@@ -1,0 +1,10 @@
+[workspace]
+members = ["f103-cb"]
+resolver = "3"
+
+[profile.release]
+# disable lto optimazation
+lto = true
+
+[profile.dev]
+opt-level = 0

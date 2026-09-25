@@ -1,0 +1,43 @@
+[package]
+authors = ["asmeenk12@gmail.com>"]
+categories = [
+  "embedded",
+  "science::robotics",
+  "no-std",
+  "no-std::no-alloc",
+]
+description = "A simple and easy to use implementation of the Field Oriented Control (foc) for brushless motors."
+edition = "2021"
+keywords = ["foc", "bldc", "motor", "vector-control", "rtic"]
+license = "MIT OR Apache-2.0"
+name = "foc-simple-rtic"
+repository = "https://github.com/smeenka/foc-simple-rtic"
+version = "0.1.0"
+
+[dependencies]
+cordic = "0.1.5"
+cortex-m = {version = "0.7", features = ["critical-section-single-core"]}
+cortex-m-rt = "0.7"
+defmt = "1.1"
+embedded-hal = "1.0"
+fixed = "1.31"
+foc = "0.3.0"
+heapless = {version = "0.9", default-features = false}
+panic-probe = {version = "1.0.0", features = ["print-defmt"]}
+rtt-target = {version = "0.6", features = ["log", "defmt"]}
+
+rtic-time = {version = "2.0", features = []}
+rtic-sync = {version = "1.5", features = []}
+
+[profile.release]
+# disable lto optimization
+debug = 2
+lto = true
+
+[profile.dev]
+opt-level = "s"
+
+[dev-dependencies]
+env_logger = "0.11"
+log = "0.4"
+
