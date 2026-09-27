@@ -10,7 +10,7 @@ pub struct FocPwm<D: PwmDriver> {
   driver: D,
   modulation: EModulation,
   max_pwm: u16,
-  max_torque: I16F16, // can be set at in the enum foc_mode. Must be in range 0.01..1
+  max_torque: I16F16, // constant. Can be set in the constructor of this struct. Absolute max value of the torque
   torque_limit_neg: I16F16,
   torque_limit_pos: I16F16,
   torque_pd: FocPd,

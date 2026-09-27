@@ -12,15 +12,15 @@ pub const COMMAND_QUEUE_LEN:usize = 5;
 
 #[derive(Clone, Debug, Copy, PartialEq)]
 pub enum EFocCommand {
-  FocMode(foc::EFocMode),
-  Speed(I16F16),
-  SpeedAcc(I16F16),
-  Angle(I16F16),
-  Torque(I16F16),
-  ShaftPosition(ShaftPosition),
-  TorqueLimit(I16F16),
-  NrPoles(u8),
-  ErrorCount,
+  FocMode(foc::EFocMode),       // select the foc mode: idle, calibration, velocity, angle, torque
+  Speed(I16F16),                // speed mode: set speed in turns/s
+  SpeedAcc(I16F16),             // speed mode: set acceleration in turns/s*s
+  Angle(I16F16),                // angle modeL: set the requested angle in 0 ..TAU 
+  Torque(I16F16),               // torque modeL set the target torque
+  ShaftPosition(ShaftPosition), // angle mode: set the requested target postion: rotations and angle
+  TorqueLimit(I16F16),          // all modes: limit the max torque which is send to the current controller
+  NrPoles(u8),                  // idle modeL: set the nr of poles. Note: a calibration is needed after changing the number of poles
+  ErrorCount,                   // show the error count on the rtt channel, and reset to zero
 }
 
 #[derive(Clone, Debug, Copy, PartialEq)]

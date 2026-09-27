@@ -71,7 +71,7 @@ impl FocPid {
 
     p + i - d
   }
-
+  // update the pid controller with as inputs the requested shaft position, and the measered shaft position
   pub fn update_position(&mut self, setpoint: &ShaftPosition, measurement: &ShaftPosition) -> I16F16 {
     let error = setpoint.compare(measurement);
     let p = self.kp * error;

@@ -1,5 +1,5 @@
 use core::fmt::Write;
-use fixed::types::I16F16;
+use fixed::types::{I16F16, I6F26};
 use heapless::String;
 use rtic_sync::channel::Sender;
 use crate::COMMAND_QUEUE_LEN;
@@ -7,7 +7,7 @@ use crate::COMMAND_QUEUE_LEN;
 use crate::foc::MAX_MOTOR_NR;
 use crate::{
   foc::{CalParams, EDir, EFocMode},
-  EFocCommand, PidParam, FocSerial,
+  EFocCommand, PidParam, FocSerial,ShaftPosition
 };
 
 #[derive(Clone, Debug, Copy, PartialEq)]
@@ -74,10 +74,14 @@ where
   }
 
   fn handle_line(&mut self, line: &[u8]) {
-    let gotmsg: &str = core::str::from_utf8(line).unwrap().into();
-    let words = gotmsg.split(" ");
-    for word in words {
-      self.handle_word(word);
+    match core::str::from_utf8(line) {
+      Ok(gotmsg) => {
+        let words = gotmsg.split(" ");
+        for word in words {
+          self.handle_word(word);
+        }
+      }
+      Err(_) => self.send("UTF8 error while parsing incoming line\r\n")
     }
   }
   fn handle_word(&mut self, m: &str) {
@@ -89,6 +93,7 @@ where
       "he" => self.help(),
       "ts" => self.set_speed(m, "Speed:"),
       "ta" => self.set_angle(m, "Angle:"),
+      "tp" => self.set_position(m, "Position:"),
       "tt" => self.set_torque(m, "Torque:"),
       "tl" => self.set_torque_limit(m, "Torque Limit:"),
       "pa" => self.set_acceleration(m, "Speed Acceleration:"),
@@ -174,6 +179,17 @@ where
   fn set_angle(&mut self, word: &str, text: &str) {
     if let Some(f) = self.parse_float(word, text) {
       self.senders[self.motor_nr].try_send(EFocCommand::Angle(f)).ok();
+    }
+  }
+  fn set_position(&mut self, word: &str, text: &str) {
+    if let Some(f) = self.parse_float(word, text) {
+      let r = f.checked_div(I16F16::TAU).unwrap();
+      // round in the correct way, for positive rotations to -infinity, for negative towarde +infinity
+      let rotations = if r >= 0 {r.floor()} else {r.ceil()};
+      let angle = f.checked_rem(I16F16::TAU).unwrap();
+      let mut shaft = ShaftPosition::new();
+      shaft.set_shaft(rotations.to_num(), I6F26::from_num(angle));
+      self.senders[self.motor_nr].try_send(EFocCommand::ShaftPosition(shaft)).ok();
     }
   }
   fn set_torque(&mut self, word: &str, text: &str) {
@@ -268,11 +284,12 @@ where
   pub fn help(&mut self) {
     self.send("\r\nHow to use  ... \r\n");
     self.send("  he        -- help this message\r\n");
-    self.send("  ts<float> -- set target speed\r\n");
-    self.send("  ta<float> -- set target angle\r\n");
-    self.send("  tt<float> -- set target torque\r\n");
-    self.send("  tl<float> -- set max torque limit\r\n");
-    self.send("  pa<float> -- set speed acceleration in rad/sec2\r\n");
+    self.send("  ts<float> -- set target speed in turns/s\r\n");
+    self.send("  ta<float> -- set target angle. Range 0 .. TAU\r\n");
+    self.send("  tp<float> -- set target position Range -31K . 31K TAU \r\n");
+    self.send("  tt<float> -- set target torque. Range 0..1\r\n");
+    self.send("  tl<float> -- set max torque limit. Range 0..1\r\n");
+    self.send("  pa<float> -- set speed acceleration in turns/sec2\r\n");
     self.send("  np<int>   -- set motor pole count\r\n");
     self.send("  mc        -- mode calibration. Start with this function!\r\n");
     self.send("  mi        -- mode idle\r\n");
