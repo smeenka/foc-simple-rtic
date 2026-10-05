@@ -1,5 +1,5 @@
 [workspace]
-members = ["f103-cb"]
+members = ["f103-cb", "storm32"]
 resolver = "3"
 
 [profile.release]

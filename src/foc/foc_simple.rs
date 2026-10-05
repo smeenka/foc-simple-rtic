@@ -4,7 +4,7 @@ use rtt_target::rprintln;
 use crate::{
   foc::{EDir, EFocMode},
   tools::foc_pid::FocPid,
-  EFocAngle, EFocSimpleError, Result, ShaftPosition,
+  EFocSimpleError, Result, ShaftPosition,
 };
 use crate::{COMMAND_QUEUE_LEN, EFocCommand};
 use rtic_sync::channel::Receiver;
@@ -21,12 +21,13 @@ pub struct FocSimple {
   inner_loop_hz:i32,  // inner loop frequency in hz
   // angle sensor
   shaft_position_act: ShaftPosition,
-  angle: EFocAngle,
   velocity: I16F16, // rad / s. Filtered with a lowpass filter of ca 10 Hrz
   nr_poles: i32,
+  open_loop_velocity: bool,
   // current sensor
   // internal state
-  electrical_offset: I6F26, // offset of the angle sensor with respect to the poles of the motor in radians.
+  electrical_offset: I16F16, // offset of the angle sensor with respect to the poles of the motor in radians.
+  electrical_angle: I16F16,
   speed_req: I16F16,
   speed_acc: I16F16, // in rad/100 ms
   speed_act: I16F16,
@@ -62,15 +63,16 @@ impl FocSimple {
       // user request parameters
       shaft_position_req: ShaftPosition::new(),
       foc_mode: EFocMode::Idle,
-      electrical_offset: I6F26::ZERO,
+      electrical_offset: I16F16::ZERO,
+      electrical_angle: I16F16::ZERO,
       velocity: I16F16::ZERO, // in rad per second
       shaft_position_act: ShaftPosition::new(),
       nr_poles: 1,  
       inner_loop_hz: 5_000,
+      open_loop_velocity: true,
       // internal state
       calibration_state: ECalibrateState::Init,
       target_pid: FocPid::new(I16F16::ONE, I16F16::ONE, I16F16::ONE),
-      angle: EFocAngle::SensorLess,
       temp: I16F16::ZERO,
       speed_req: I16F16::ZERO,
       speed_acc: I16F16::ONE / 10, // in rad/100 ms
@@ -124,7 +126,7 @@ impl FocSimple {
   /// only to be used for test function. Be carefull with setting the value manually!
   /// Incorrect use can damage the motor.
   pub fn set_electrical_offset(&mut self, offset: I16F16) {
-    self.electrical_offset = I6F26::from_num(offset);
+    self.electrical_offset = offset;
   }
   pub fn set_nr_poles(&mut self, nr: usize) {
     if let EFocMode::Idle = self.foc_mode {
@@ -143,7 +145,9 @@ impl FocSimple {
   pub fn is_idle(&self) -> bool {
     self.foc_mode == EFocMode::Idle
   }
-
+  pub fn set_inner_loop_hz(&mut self, hz: usize) {
+    self.inner_loop_hz = hz as i32;
+  }
   pub fn get_velocity(&self) -> I16F16 {
     self.velocity
   }
@@ -163,14 +167,11 @@ impl FocSimple {
     match self.foc_mode {
       EFocMode::Calibration(param) => match param {
         Some(p) => {
-          self.electrical_offset = I6F26::from_num(p.zero);
+          self.electrical_offset = p.zero;
           self.shaft_position_act.set_inversed(p.dir == EDir::Ccw);
           self.foc_mode = EFocMode::Idle;
         }
         None => {
-          // assume a angle sensor is present. 
-          self.angle = EFocAngle::SensorValue(I16F16::ZERO);
-          self.electrical_offset = I6F26::ZERO;
           self.shaft_position_act.set_inversed(false);
           self.calibration_state = ECalibrateState::Init;
           if self.torque.abs() > 0.4 {
@@ -184,7 +185,8 @@ impl FocSimple {
 
         self.shaft_position_req = self.shaft_position_act.clone();
       }
-      EFocMode::Velocity(param) => {
+      EFocMode::Velocity(param, open_loop) => {
+        self.open_loop_velocity = open_loop;
         self.speed_req = I16F16::ZERO;
         self.speed_act = I16F16::ZERO;
         self.speed_delta_inc = I6F26::ZERO;
@@ -206,56 +208,42 @@ impl FocSimple {
   /// update the state of the foc controller. as fast as possible
   /// Returned is a tuple of the electrical angle, and the requested torque
   pub fn inner_loop(&mut self) -> Result<(I16F16, I16F16)> {
-    let electrical_angle = self.nr_poles * self.shaft_position_act.angle - self.electrical_offset;
     match self.foc_mode {
-      EFocMode::Idle => Ok((I16F16::from_num(electrical_angle), I16F16::ZERO)),
+      EFocMode::Idle => Ok((self.electrical_angle, I16F16::ZERO)),
       EFocMode::Error(e) => Err(e),
-      EFocMode::Calibration(_) => match self.angle {
-        EFocAngle::SensorLess => Err(EFocSimpleError::NoAngleSensor),
-        _ => self.do_calibration(),
-      },
-
+      EFocMode::Calibration(_) => self.do_calibration(),
       EFocMode::Angle(_) => {
-        match self.angle {
-          EFocAngle::SensorLess => Err(EFocSimpleError::NoAngleSensor),
-          _ => {
-            // Compare actual position with requested
-            let torque = self
-              .target_pid
-              .update_position(&self.shaft_position_req, &self.shaft_position_act)
-              .clamp(self.torque_limit_neg, self.torque_limit_pos);
-            Ok((I16F16::from_num(electrical_angle), torque))
-          }
-        }
+        // Compare actual position with requested
+        let torque = self
+          .target_pid
+          .update_position(&self.shaft_position_req, &self.shaft_position_act)
+          .clamp(self.torque_limit_neg, self.torque_limit_pos);
+        Ok((I16F16::from_num(self.electrical_angle), torque))
       }
-      EFocMode::Velocity(_) => {
-        match self.angle {
-          EFocAngle::SensorLess => {
+      EFocMode::Velocity(_, _) => {
+        if self.open_loop_velocity {
             // note that in sensorless mode the shaft_position_req is the electrical angle of the shaft
             let delta_electrical_angle = self.nr_poles * self.speed_delta_inc;
             self.shaft_position_req.inc(delta_electrical_angle); // increment requested angle in rad/s
                                                                  // set the torque with the torque limit function
             let request_angle = I16F16::from_num(self.shaft_position_req.get_angle());
             Ok((request_angle, self.torque))
+        } else {
+          // increment the requested shaft position, but only if the diff with the actual shaft position is not too big
+          let diff = self.shaft_position_req.compare(&self.shaft_position_act);
+          if diff.abs() < I16F16::PI {
+            let delta_angle = self.speed_delta_inc;
+            self.shaft_position_req.inc(delta_angle);
           }
-          _ => {
-            // increment the requested shaft position, but only if the diff with the actual shaft position is not too big
-            let diff = self.shaft_position_req.compare(&self.shaft_position_act);
-            if diff.abs() < I16F16::PI {
-              let delta_angle = self.speed_delta_inc;
-              self.shaft_position_req.inc(delta_angle);
-            }
-            let requested_torque = self
-              .target_pid
-              .update_position(&self.shaft_position_req, &self.shaft_position_act)
-              .clamp(self.torque_limit_neg, self.torque_limit_pos);
-            Ok((I16F16::from_num(electrical_angle), requested_torque))
-          }
+          let requested_torque = self
+            .target_pid
+            .update_position(&self.shaft_position_req, &self.shaft_position_act)
+            .clamp(self.torque_limit_neg, self.torque_limit_pos);
+          Ok((I16F16::from_num(self.electrical_angle), requested_torque))
         }
       }
-      EFocMode::Torque(_) => match self.angle {
-        EFocAngle::SensorLess => Err(EFocSimpleError::NoAngleSensor),
-        _ => Ok((I16F16::from_num(electrical_angle), self.torque)),
+      EFocMode::Torque(_) => {
+        Ok((I16F16::from_num(self.electrical_angle), self.torque))
       },
     }
   }
@@ -313,7 +301,7 @@ impl FocSimple {
       ECalibrateState::Init => {
         self.shaft_position_req.reset();
         self.shaft_position_act.reset();
-        self.electrical_offset = I6F26::ZERO;
+        self.electrical_offset = I16F16::ZERO;
         self.calibration_state = ECalibrateState::FindDirection;
       }
       ECalibrateState::FindDirection => {
@@ -346,9 +334,12 @@ impl FocSimple {
         // state end condition after exact 2 electrical turns + 3/4 TAU
         if req.rotations > 2 && req.angle > 3 * I16F16::FRAC_TAU_4 {
           // determin electrical offset with current offset == 0
-          let offset = self.shaft_position_act.get_angle() * self.nr_poles;
+          let mut offset = I16F16::from_num(self.shaft_position_act.get_angle()) * self.nr_poles;
           // normalize to 0 .. TAU
-          self.electrical_offset = ShaftPosition::clamp(offset);
+          while offset > I16F16::TAU {
+            offset -= I16F16::TAU;
+          }
+          self.electrical_offset = offset;
           self.calibration_state = ECalibrateState::ReturnToStart;
           rprintln!("Electrical offset:{}", self.electrical_offset);
         } else {
@@ -369,6 +360,13 @@ impl FocSimple {
     }
     Ok((I16F16::from_num(self.shaft_position_req.get_angle()), self.torque.abs()))
   }
+
+  pub fn update_angle_from_sensor(&mut self, measured_angle: I16F16) {
+    let angle = I6F26::from_num(measured_angle);
+    self.shaft_position_act.update_shaft_angle(angle);
+    self.electrical_angle = measured_angle * self.nr_poles - self.electrical_offset;
+  }
+
 
   // HALL related stuff
   /// calculate from the raw hall state the functional hall state 0-1-2-3-4-5
@@ -411,8 +409,8 @@ impl FocSimple {
       let hall_state_idx = self.hall_step_base + hall_state as u8;
       // calculate the not interpolated angle
       let angle = self.hall_step_angle * hall_state_idx as i32;
-      self.angle = EFocAngle::SensorValue(I16F16::from_num(angle));
       self.shaft_position_act.update_shaft_angle(angle);
+      self.electrical_angle = I16F16::from_num(angle) * self.nr_poles - self.electrical_offset;
     }
   }  
   // user interface commands
@@ -425,7 +423,7 @@ impl FocSimple {
           }
           EFocCommand::ShaftPosition(shaft_pos) => self.set_position_req(shaft_pos),
           EFocCommand::Speed(speed) => self.set_speed(speed * I16F16::TAU),
-          EFocCommand::SpeedAcc(acc) => self.set_acceleration(acc * I16F16::TAU),
+          EFocCommand::SpeedAcc(acc) => self.set_acceleration(acc * I16F16::TAU ),
           EFocCommand::Torque(t) => self.set_torque(t),
           EFocCommand::Angle(a) => self.set_angle(a),
           EFocCommand::TorqueLimit(tl) => self.set_torque_limit(tl),

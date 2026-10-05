@@ -54,7 +54,7 @@ impl CalParams {
 pub enum EFocMode {
   Idle,
   Calibration(Option<CalParams>),
-  Velocity(PidParam),
+  Velocity(PidParam, bool),
   Angle(PidParam),
   Torque(PidParam),
   Error(EFocSimpleError),

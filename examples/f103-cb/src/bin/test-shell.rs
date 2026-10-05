@@ -20,8 +20,8 @@ mod app {
   use foc_simple_rtic::foc::foc_simple::FocSimple;
   use foc_simple_rtic::foc::EFocMode;
   use foc_simple_rtic::foc::{foc_pwm::FocPwm, EModulation, FocHallSensor};
-  use foc_simple_rtic::{FocCommandLine, EFocCommand, EFocAngle,  PidParam, COMMAND_QUEUE_LEN};
-  use rtic_f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
+  use foc_simple_rtic::{FocCommandLine, EFocCommand, PidParam, COMMAND_QUEUE_LEN};
+  use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
   use rtic_monotonics::fugit::{Instant, Rate, RateExtU32};
   use stm32f1xx_hal::gpio::{PA15, PB10, PB14};
   use stm32f1xx_hal::{
@@ -35,7 +35,7 @@ mod app {
     timer::{Channel, PwmExt, Tim1NoRemap, Tim2NoRemap, Timer, Event},
     timer::{CounterHz}
   };
-  use rtic_f103_cb::foc_impl::FocSerialImpl;
+  use f103_cb::foc_impl::FocSerialImpl;
   use rtic_sync::{channel::*, make_channel};
   use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;  /* bring dependencies into scope */
 

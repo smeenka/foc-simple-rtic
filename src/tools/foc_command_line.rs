@@ -16,6 +16,7 @@ enum EFocModeLocal {
   Idle = 0,
   Calibration,
   Velocity,
+  OpenLoopVelocity,
   Angle,
   Torque,
 }
@@ -100,6 +101,7 @@ where
       "mi" => self.select_mode(EFocModeLocal::Idle),
       "mc" => self.select_mode(EFocModeLocal::Calibration),
       "mv" => self.select_mode(EFocModeLocal::Velocity),
+      "mo" => self.select_mode(EFocModeLocal::OpenLoopVelocity),
       "ma" => self.select_mode(EFocModeLocal::Angle),
       "mt" => self.select_mode(EFocModeLocal::Torque),
       "m0" => self.select_motor(0),
@@ -145,6 +147,7 @@ where
     match mode {
       EFocModeLocal::Angle => self.send("Angle\r\n"),
       EFocModeLocal::Velocity => self.send("Velocity\r\n"),
+      EFocModeLocal::OpenLoopVelocity => self.send("OpenLoopVelocity\r\n"),
       EFocModeLocal::Torque => self.send("Torque\r\n"),
       EFocModeLocal::Calibration => self.send("Calibration\r\n"),
       EFocModeLocal::Idle => self.send("Idle\r\n"),
@@ -154,7 +157,10 @@ where
         self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Angle(self.param_a))).ok()
       }
       EFocModeLocal::Velocity => {
-        self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Velocity(self.param_v))).ok()
+        self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Velocity(self.param_v, false))).ok()
+      }
+      EFocModeLocal::OpenLoopVelocity => {
+        self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Velocity(self.param_v, true))).ok()
       }
       EFocModeLocal::Torque => {
         self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Torque(self.param_t))).ok()
@@ -294,6 +300,7 @@ where
     self.send("  mc        -- mode calibration. Start with this function!\r\n");
     self.send("  mi        -- mode idle\r\n");
     self.send("  mv        -- mode velocity\r\n");
+    self.send("  mo        -- mode open loop velocity\r\n");
     self.send("  mt        -- mode torque\r\n");
     self.send("  m0        -- select motor 0\r\n");
     self.send("  m1        -- select motor 1\r\n");

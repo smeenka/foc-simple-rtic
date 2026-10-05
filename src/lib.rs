@@ -60,13 +60,6 @@ pub enum EFocCurrentSensor<C> {
   ThreePhase(C), // contains the implementation of the SensorCurrent Trait
 }
 
-#[derive(Clone, Debug, Copy)]
-pub enum EFocAngle {
-  SensorLess,
-  SensorValue(I16F16), // actual measured sensor value
-  Interpolate,         // interpolate actual value
-}
-
 // The trait for getting the current from the motor
 pub trait SensorCurrent {
   /// Retrieve the current from the sensor.
