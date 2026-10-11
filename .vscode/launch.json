@@ -20,7 +20,8 @@
             "cwd": "${workspaceFolder}",
             "setupCommands": [
                 { "text": "-interpreter-exec console \"monitor arm semihosting enable\"", "ignoreFailures": false },
-            ],            
+            ],
+            "connectUnderReset": true            
             
         }
     ]

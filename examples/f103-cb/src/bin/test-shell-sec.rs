@@ -16,7 +16,7 @@ systick_monotonic!(Mono, 1000);
 
 #[app(device = stm32f1xx_hal::pac, peripherals = true, dispatchers = [SPI1, SPI2])]
 mod app {
-  use rtic_f103_cb::foc_impl::FocSerialImpl;
+  use f103_cb::foc_impl::FocSerialImpl;
   use rtic_monotonics::fugit::{Rate, RateExtU32};
   use stm32f1xx_hal::{
     afio::AfioExt,

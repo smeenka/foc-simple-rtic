@@ -7,6 +7,7 @@ use crate::tools::shaft_position::ShaftPosition;
 pub use crate::tools::foc_command_line::FocCommandLine;
 pub mod foc;
 pub mod tools;
+pub mod vesc_slave;
 
 pub const COMMAND_QUEUE_LEN:usize = 5;
 
@@ -36,6 +37,8 @@ pub enum EFocSimpleError {
   NoCurrentSensor,
   NotImplementedYet,
   NoData,
+  VescParseError,
+  VescCrcError,
   Error,
 }
 pub type Result<T> = core::result::Result<T, EFocSimpleError>;
@@ -75,6 +78,8 @@ pub struct MessageTx {
 }
 
 pub trait FocSerial {
+  /// return the function which can read a chunk of bytes from the stream
+  /// If Ok the ok contains the actual number of bytes read
   fn receive(&mut self, buffer: &mut [u8]) -> impl Future<Output = Result<usize>>;
   fn send(&mut self, buffer: &[u8]) -> Result<()>;
 }

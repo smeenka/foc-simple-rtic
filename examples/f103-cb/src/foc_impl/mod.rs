@@ -16,6 +16,7 @@ impl FocSerialImpl {
     pub fn new(tx: Tx<USART2>, rx: Rx<USART2>) -> Self {
         FocSerialImpl { tx, rx }
     }
+    // note next function is still blocking. as the rx.read is blocking
     async fn wait_receive(&mut self, buffer: &mut [u8]) -> Result<usize> {
         let mut idx = 0;
         while self.rx.is_rx_not_empty() {
@@ -36,7 +37,6 @@ impl FocSerial for FocSerialImpl {
         // return the function, do not await here
         self.wait_receive(buffer)
     }
-
     fn send(&mut self, buffer: &[u8]) -> Result<()> {
         match self.tx.bwrite_all_u8(buffer) {
             Ok(()) => Ok(()),
