@@ -18,6 +18,9 @@ impl FocSerialImpl {
     }
     // note next function is still blocking. as the rx.read is blocking
     async fn wait_receive(&mut self, buffer: &mut [u8]) -> Result<usize> {
+        if !self.rx.is_rx_not_empty() {
+            return Ok(0)
+        }
         let mut idx = 0;
         while self.rx.is_rx_not_empty() {
             match self.rx.read() {

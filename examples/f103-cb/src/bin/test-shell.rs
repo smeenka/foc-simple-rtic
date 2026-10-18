@@ -20,7 +20,7 @@ mod app {
   use foc_simple_rtic::foc::foc_simple::FocSimple;
   use foc_simple_rtic::foc::EFocMode;
   use foc_simple_rtic::foc::{foc_pwm::FocPwm, EModulation, FocHallSensor};
-  use foc_simple_rtic::{FocCommandLine, EFocCommand, PidParam, COMMAND_QUEUE_LEN};
+  use foc_simple_rtic::{FocCommandLine, EFocCommand, PidParam, COMMAND_QUEUE_RX, COMMAND_QUEUE_TX};
   use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
   use rtic_monotonics::fugit::{Instant, Rate, RateExtU32};
   use stm32f1xx_hal::gpio::{PA15, PB10, PB14};
@@ -53,7 +53,7 @@ mod app {
     timer2: CounterHz<TIM2>,
     foc_pwm: FocPwm<PwmDriverImpl>, 
     command_line: FocCommandLine<FocSerialImpl>,
-    receiver1: Receiver<'static, EFocCommand, COMMAND_QUEUE_LEN>
+    receiver1: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>
   }
 
   #[init]
@@ -156,14 +156,15 @@ mod app {
     let parser = FocSerialImpl::new(tx, rx);
 
 
-    let (sender0, receiver0) = make_channel!(EFocCommand, COMMAND_QUEUE_LEN);
-    let (sender1, receiver1) = make_channel!(EFocCommand, COMMAND_QUEUE_LEN);
+    let (sender0, receiver0) = make_channel!(EFocCommand, COMMAND_QUEUE_TX);
+    let (sender1, receiver1) = make_channel!(EFocCommand, COMMAND_QUEUE_TX);
+    let (sender_retour, receiver_retour) = make_channel!(EFocCommand, COMMAND_QUEUE_RX);
     let senders = [sender0,sender1];
 
-    let command_line = FocCommandLine::new(parser, senders);
+    let command_line = FocCommandLine::new(parser, senders, receiver_retour);
 
 
-    let mut foc_simple = FocSimple::new(receiver0);
+    let mut foc_simple = FocSimple::new(receiver0, sender_retour);
     foc_simple.set_nr_poles(4);
 
     // Schedule the blinking task

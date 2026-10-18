@@ -16,20 +16,16 @@ version = "0.1.0"
 cordic = "0.1.5"
 cortex-m = {features = ["critical-section-single-core"], version = "0.7"}
 cortex-m-rt = "0.7"
-defmt = "1.0.1"
 embedded-hal = "1.0"
 fixed = "1.31"
-foc = "0.3.0"
 foc-simple-rtic = {path = "../..", version = "0.1.0"}
 heapless = {version = "0.9", default-features = false}
-log = {version = "0.4"}
 panic-rtt-target = {version = "0.2.0"}
 rtic = {features = ["thumbv7-backend", "test-critical-section"], version = "2.2.0"}
 rtic-monotonics = {features = ["cortex-m-systick"], version = "2.1.0"}
 rtt-target = {version = "0.6.1", features = ["log", "defmt"]}
 stm32f1xx-hal = {features = ["rtic", "stm32f103", "medium"], version = "0.11.0"}
 rtic-sync = {version = "1.5", features = []}
-crc16 = "0.4"
 
 [profile.release]
 codegen-units = 1 # Reduce number of codegen units to increase optimizations

@@ -1,14 +1,15 @@
 use core::fmt::Write;
-use fixed::types::{I16F16, I6F26};
+use fixed::types::{I16F16};
 use heapless::String;
-use rtic_sync::channel::Sender;
-use crate::COMMAND_QUEUE_LEN;
+use rtic_sync::channel::{Sender, Receiver};
+use crate::{COMMAND_QUEUE_RX, COMMAND_QUEUE_TX, EFocLimit, EFocMonitor, EFocSimpleError, EPid, EPidParameter, Result};
 
 use crate::foc::MAX_MOTOR_NR;
 use crate::{
   foc::{CalParams, EDir, EFocMode},
-  EFocCommand, PidParam, FocSerial,ShaftPosition
+  EFocCommand, FocSerial
 };
+use rtt_target::rprintln;
 
 #[derive(Clone, Debug, Copy, PartialEq)]
 #[repr(usize)]
@@ -21,100 +22,128 @@ enum EFocModeLocal {
   Torque,
 }
 
+// for spec  see https://docs.simplefoc.com/commander_motor
 pub struct FocCommandLine<C: FocSerial> {
   // user request
   serial: C,
-  senders: [Sender<'static, EFocCommand, COMMAND_QUEUE_LEN>; MAX_MOTOR_NR],
+  senders: [Sender<'static, EFocCommand, COMMAND_QUEUE_TX>; MAX_MOTOR_NR],
+  receiver: Receiver<'static, EFocCommand, COMMAND_QUEUE_RX>,
   motor_nr: usize,
   foc_mode: EFocModeLocal,
-  param_v: PidParam,
-  param_a: PidParam,
-  param_t: PidParam,
   param_c: Option<CalParams>,
+  verbose: u32,
 }
 
 impl<C> FocCommandLine<C>
 where
   C: FocSerial,
 {
-  pub fn new(serial: C, senders: [Sender<'static, EFocCommand, COMMAND_QUEUE_LEN>; MAX_MOTOR_NR]) -> Self {
-    let param_v = PidParam::new_fp(0.1, 0.0, 0.0);
-    let param_a = PidParam::new_fp(0.4, 0.0, 0.0);
-    let param_t = PidParam::new_fp(1.0, 0.0, 0.0);
+  pub fn new(serial: C, senders: [Sender<'static, EFocCommand, COMMAND_QUEUE_TX>; MAX_MOTOR_NR], receiver:Receiver<'static, EFocCommand, COMMAND_QUEUE_RX> ) -> Self {
     FocCommandLine {
       serial,
       senders,
+      receiver,
       foc_mode: EFocModeLocal::Idle,
-      param_a,
-      param_t,
-      param_v,
       param_c: None,
       motor_nr: 0,
+      verbose: 0
     }
   }
   pub async fn task(&mut self) {
-    self.send("\r\nStarting Foc Serial Parser task\r\n");
-    self.help();
+    rprintln!("Starting Foc Command Line Parser task\r\n");
+    rprintln!("See https://docs.simplefoc.com/commander_motor for the motor commands");
     let mut line = [0_u8; 128];
     let mut line_idx = 0;
     loop {
       let mut word = [0_u8; 32];
+      match self.receiver.try_recv(){
+        Ok(m) => self.handle_from_foc(m),
+        Err(_) => ()
+      }
       if let Ok(len) = self.serial.receive(&mut word).await {
         for idx in 0..len {
           let a = word[idx];
-          if a == 10 || a == 13 || a == 32 {
-            self.handle_line(&line[0..line_idx]);
-            line_idx = 0;
-          } else {
-            line[line_idx] = a;
-            line_idx += 1;
+          match a {
+              10 | 13 => {
+                // skip CR or LF if on position 0. Thats the way to handle CRLF or LFCR
+                if line_idx > 0 {
+                  if self.verbose & 2 == 2 {
+                    rprintln!("Line:{:?}",&line[0..line_idx]);
+                  }
+                  if let Err(e) = self.handle_line(&line[0..line_idx]){
+                    if self.verbose & 1 == 1 {
+                      rprintln!("Error:{:?} line:{:?}",e, &line[0..line_idx]);
+                    }
+                  };
+                  line_idx = 0
+                }
+              }
+            _ => {
+              line[line_idx] = a;
+              if line_idx < line.len() -2 {
+                line_idx += 1;
+              }
+            }
           }
         }
       }
     }
   }
 
-  fn handle_line(&mut self, line: &[u8]) {
+  fn handle_line(&mut self, line: &[u8]) -> Result<()>{
     match core::str::from_utf8(line) {
-      Ok(gotmsg) => {
-        let words = gotmsg.split(" ");
-        for word in words {
-          self.handle_word(word);
+      Ok(linestr) => {
+        //rprintln!("Line:{:?}", linestr);
+        match &linestr[0..1]{ 
+          "?" => { 
+            self.send("?0: motor 0\r\n?1: motor 1\r\n");
+            return Ok(())
+          }
+          _ => ()
         }
+        if linestr.len() > 1 {
+          self.parse_line(linestr) 
+        } else  {
+          Err(EFocSimpleError::SerialError)
+        }  
       }
-      Err(_) => self.send("UTF8 error while parsing incoming line\r\n")
+      Err(_) => Err(EFocSimpleError::SerialError)
     }
   }
-  fn handle_word(&mut self, m: &str) {
-    if m.len() < 2 {
-      self.send("Word must be at least 2 characters\r\n");
-      return;
+  
+  fn parse_line(&mut self, m: &str) -> Result<()>{
+    match &m[0..1] {
+      "0" => self.motor_nr = 0,
+      "1" => self.motor_nr = 1,
+      _  => return Err(EFocSimpleError::MotorNrError)
     }
-    match &m[0..2] {
-      "he" => self.help(),
-      "ts" => self.set_speed(m, "Speed:"),
-      "ta" => self.set_angle(m, "Angle:"),
-      "tp" => self.set_position(m, "Position:"),
-      "tt" => self.set_torque(m, "Torque:"),
-      "tl" => self.set_torque_limit(m, "Torque Limit:"),
-      "pa" => self.set_acceleration(m, "Speed Acceleration:"),
-      "mi" => self.select_mode(EFocModeLocal::Idle),
-      "mc" => self.select_mode(EFocModeLocal::Calibration),
-      "mv" => self.select_mode(EFocModeLocal::Velocity),
-      "mo" => self.select_mode(EFocModeLocal::OpenLoopVelocity),
-      "ma" => self.select_mode(EFocModeLocal::Angle),
-      "mt" => self.select_mode(EFocModeLocal::Torque),
-      "m0" => self.select_motor(0),
-      "m1" => self.select_motor(1),
-      "np" => self.set_nr_poles(m, "Motor Poles count:"),
-      "kp" => self.set_param(&m),
-      "ki" => self.set_param(&m),
-      "kd" => self.set_param(&m),
-      "co" => self.set_calibration_offset(&m),
-      "ec" => {
-        _ = self.senders[self.motor_nr].try_send(EFocCommand::ErrorCount).ok();
-      },
-      _ => self.help(),
+    let command = match &m[1..2] {
+      "Q" | "D" | "V" | "A"=> self.handle_pid_param(m),
+      "R" => Err(EFocSimpleError::NotImplementedYet),
+      "I" => Err(EFocSimpleError::NotImplementedYet),
+      "K" => Err(EFocSimpleError::NotImplementedYet),
+      "S" => self.handle_sensor_offsets(m),
+      "W" => self.handle_pwm_settings(m),
+      "L" => self.handle_limits(m),
+      "M" => self.handle_monitor(m),
+      "C" => self.handle_motion_mode(m),
+      "T" => Err(EFocSimpleError::NotImplementedYet),
+      "F" => self.handle_init_foc(m),
+      "E" => self.handle_motor_status(m),
+      "p" => self.set_nr_poles(m, "Motor Poles count:"),
+      _ => self.handle_target(m)
+    };
+    match command {
+      Ok(c) => {
+        if c != EFocCommand::EnableStatus(false, false) {
+          if self.verbose & 4 == 4 {
+            rprintln!("command:{:?}",&c);
+          }
+        }
+        self.senders[self.motor_nr].try_send(c).ok();
+        Ok(())
+      }
+      Err(e) => Err(e)
     }
   }
 
@@ -141,131 +170,181 @@ where
     self.send(&msg);
   }
 
-  fn select_mode(&mut self, mode: EFocModeLocal) {
-    self.send("Select mode:");
-    self.foc_mode = mode;
-    match mode {
-      EFocModeLocal::Angle => self.send("Angle\r\n"),
-      EFocModeLocal::Velocity => self.send("Velocity\r\n"),
-      EFocModeLocal::OpenLoopVelocity => self.send("OpenLoopVelocity\r\n"),
-      EFocModeLocal::Torque => self.send("Torque\r\n"),
-      EFocModeLocal::Calibration => self.send("Calibration\r\n"),
-      EFocModeLocal::Idle => self.send("Idle\r\n"),
+  fn handle_pid_param(&mut self, m: &str) -> Result<EFocCommand>{
+    let value = match m.len() {
+      1 | 2 => return Err(EFocSimpleError::SerialParseError),
+      3 => I16F16::ZERO,
+      _ => self.parse_float(&m[3..], "Pid Parameter")?
     };
-    match mode {
-      EFocModeLocal::Angle => {
-        self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Angle(self.param_a))).ok()
-      }
-      EFocModeLocal::Velocity => {
-        self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Velocity(self.param_v, false))).ok()
-      }
-      EFocModeLocal::OpenLoopVelocity => {
-        self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Velocity(self.param_v, true))).ok()
-      }
-      EFocModeLocal::Torque => {
-        self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Torque(self.param_t))).ok()
-      }
-      EFocModeLocal::Calibration => {
-        self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Calibration(None))).ok()
-      }
-      EFocModeLocal::Idle => self.senders[self.motor_nr].try_send(EFocCommand::FocMode(EFocMode::Idle)).ok(),
+    let pid_param = match &m[2..3] {
+      "P" => EPidParameter::P(value),
+      "I" => EPidParameter::I(value),
+      "D" => EPidParameter::D(value),
+      "L" => EPidParameter::Limit(value),
+      "R" => EPidParameter::Ramp(value),
+      "F" => EPidParameter::Filter(value),
+      _ => return Err(EFocSimpleError::NotImplementedYet)
     };
-  }
-  fn select_motor(&mut self, m: usize) {
-    self.send("Select motor:");
-    self.send_usize(m);
-    self.send_nl();
-    self.motor_nr = m;
-  }
-  fn set_speed(&mut self, word: &str, text: &str) {
-    if let Some(f) = self.parse_float(word, text) {
-      self.senders[self.motor_nr].try_send(EFocCommand::Speed(f)).ok();
+    let pid = match &m[1..2] {
+      "Q" => EPid::CurrentQ(pid_param),
+      "D" => EPid::CurrentD(pid_param),
+      "V" => EPid::Velocity(pid_param),
+      "A" => EPid::Angle(pid_param),
+      _ => return Err(EFocSimpleError::NotImplementedYet)
+    };
+    Ok(EFocCommand::Pid(pid, m.len() > 3))
+  } 
+
+  fn handle_limits(&mut self, m: &str) -> Result<EFocCommand>{
+    let value = match m.len() {
+      1 | 2 => return Err(EFocSimpleError::SerialParseError),
+      3 => I16F16::ZERO,
+      _ => self.parse_float(&m[3..], "Limit")?
+    };
+
+    let limit = match &m[2..3] {
+      "C" => EFocLimit::Current(value),
+      "U" => EFocLimit::Voltage(value),
+      "V" => EFocLimit::Velocity(value),
+      "A" => EFocLimit::Acceleration(value),
+      _ => return Err(EFocSimpleError::NotImplementedYet)
+    };
+    rprintln!("Limit: {:?}", &limit);
+    Ok(EFocCommand::Limit(limit, m.len() > 3))
+  } 
+  fn handle_sensor_offsets(&mut self, m: &str) -> Result<EFocCommand>{
+    let _value = match m.len() {
+      1 | 2 => return Err(EFocSimpleError::SerialParseError),
+      3 => I16F16::ZERO,
+      _ => self.parse_float(&m[3..], "Sensor Offset")?
+    };
+    match &m[2..3] {
+        "M" => Err(EFocSimpleError::NotImplementedYet),
+        "E" => Err(EFocSimpleError::NotImplementedYet),
+      _ => Err(EFocSimpleError::NotImplementedYet)
     }
-  }
-  fn set_angle(&mut self, word: &str, text: &str) {
-    if let Some(f) = self.parse_float(word, text) {
-      self.senders[self.motor_nr].try_send(EFocCommand::Angle(f)).ok();
+  } 
+  fn handle_pwm_settings(&mut self, m: &str) -> Result<EFocCommand>{
+    let _value = match m.len() {
+      1 | 2 => return Err(EFocSimpleError::SerialParseError),
+      3 => I16F16::ZERO,
+      _ => self.parse_float(&m[3..], "PWM setting")?
+    };
+    match &m[2..3] {
+        "T" => Err(EFocSimpleError::NotImplementedYet),
+        "C" => Err(EFocSimpleError::NotImplementedYet),
+      _ => Err(EFocSimpleError::NotImplementedYet)
     }
-  }
-  fn set_position(&mut self, word: &str, text: &str) {
-    if let Some(f) = self.parse_float(word, text) {
-      let r = f.checked_div(I16F16::TAU).unwrap();
-      // round in the correct way, for positive rotations to -infinity, for negative towarde +infinity
-      let rotations = if r >= 0 {r.floor()} else {r.ceil()};
-      let angle = f.checked_rem(I16F16::TAU).unwrap();
-      let mut shaft = ShaftPosition::new();
-      shaft.set_shaft(rotations.to_num(), I6F26::from_num(angle));
-      self.senders[self.motor_nr].try_send(EFocCommand::ShaftPosition(shaft)).ok();
+  } 
+  fn handle_monitor(&mut self, m: &str) -> Result<EFocCommand>{
+    let value = match m.len() {
+      1 | 2 => return Err(EFocSimpleError::SerialParseError),
+      3 => 0,
+      _ => self.parse_integer(&m[3..], "Monitor")?
+    };
+    let command = match &m[2..3] {
+      "D" => EFocMonitor::DownSample(value as u32),
+      "C" => EFocMonitor::Set([false;7]),
+      "S" => EFocMonitor::Set([
+          value & 1 == 1, value & 2 ==2, value & 4 ==4, value &8 ==8, value & 0x10 == 0x10,
+          value & 0x20 == 0x20, value & 0x40 == 0x40 
+        ]),
+      "V" => {self.verbose = value as u32;
+        rprintln!("Set Verbose to:0x{:x}", value);
+        return Err(EFocSimpleError::NotImplementedYet)
+      }
+      _ => return Err(EFocSimpleError::NotImplementedYet)    
+    };
+    Ok(EFocCommand::Monitor(command, m.len() > 3))
+  } 
+
+  fn handle_motor_status(&mut self, m: &str) -> Result<EFocCommand>{
+    let enabled = match m.len() {
+      1  => return Err(EFocSimpleError::SerialParseError),
+      2 => false,   // getter case
+      _ => match &m[2..3] { // setter case
+        "0" => false,
+        "1" => true,
+        _ => return Err(EFocSimpleError::SerialParseError),
+      }
+    };
+    Ok(EFocCommand::EnableStatus(enabled, m.len() > 2))
+  } 
+
+  fn handle_motion_mode(&mut self, m: &str) -> Result<EFocCommand>{
+    let mode = match m.len() {
+      1 | 2 => return Err(EFocSimpleError::SerialParseError),
+      _ => {               // setter case
+        match &m[2..3] {
+          "D" | "T" | "5" | "6" => return Err(EFocSimpleError::NotImplementedYet),
+          "0" => EFocMode::Torque,
+          "1" => EFocMode::Velocity(false),
+          "2" => EFocMode::Angle(false),
+          "3" => EFocMode::Velocity(true),
+          "4" => EFocMode::Angle(true),
+          _ => return Err(EFocSimpleError::NotImplementedYet)
+        }
+      }
+    };
+    Ok(EFocCommand::MotionControl(mode, true))
+  } 
+
+  fn handle_init_foc(&mut self, m: &str) -> Result<EFocCommand>{
+    match m.len() {
+      1 | 2=> Err(EFocSimpleError::SerialParseError),
+      _ => {               
+        match &m[2..3] {
+          "R" => Ok(EFocCommand::MotionControl(EFocMode::Calibration(None), true)),
+          _ => Err(EFocSimpleError::NotImplementedYet)
+        }
+      }
     }
-  }
-  fn set_torque(&mut self, word: &str, text: &str) {
-    if let Some(f) = self.parse_float(word, text) {
-      self.senders[self.motor_nr].try_send(EFocCommand::Torque(f)).ok();
+  } 
+
+  fn handle_target(&mut self, m: &str) -> Result<EFocCommand> {  
+    let value = self.parse_float(&m[1..], "Target")?;
+    let mut velocity= None;
+    let mut torque = None;
+
+    let words = m.split(" ");
+    let mut idx = 0;
+    for word in words {
+      match idx {
+        0 => (),
+        1 => torque = Some(self.parse_float(word, "Torque limit")?),
+        2 => velocity = Some(self.parse_float(word, "Velocity limit")?),
+        _ => () // ignore the rest
+      }
+      idx +=1;
     }
-  }
-  fn set_acceleration(&mut self, word: &str, text: &str) {
-    if let Some(f) = self.parse_float(word, text) {
-      self.senders[self.motor_nr].try_send(EFocCommand::SpeedAcc(f)).ok();
-    }
+    Ok(EFocCommand::Target(value, torque, velocity))
   }
 
-  fn set_torque_limit(&mut self, word: &str, text: &str) {
-    if let Some(f) = self.parse_float(word, text) {
-      self.senders[self.motor_nr].try_send(EFocCommand::TorqueLimit(f)).ok();
-    }
-  }
-  fn set_nr_poles(&mut self, word: &str, text: &str) {
-    if let Some(f) = self.parse_float(word, text) {
-      let poles = f.to_num();
-      self.senders[self.motor_nr].try_send(EFocCommand::NrPoles(poles)).ok();
-    }
+  fn set_nr_poles(&mut self, word: &str, text: &str) -> Result<EFocCommand>{
+    let f = self.parse_float(word, text)?; 
+    let poles = f.to_num();
+    Ok(EFocCommand::NrPoles(poles))
   }
 
-  fn parse_float(&mut self, word: &str, text: &str) -> Option<I16F16> {
-    self.send(text);
-    match word[2..].parse::<I16F16>() {
+  fn parse_float(&mut self, word: &str, text: &str) -> Result<I16F16> {
+    match word.parse::<I16F16>() {
       Err(_) => {
-        self.send("Unable to parse float after command\r\n");
-        None
+        rprintln!("Error: For:{} unable to parse float:{}", text, word);
+        Err(EFocSimpleError::SerialParseError)
       }
       Ok(f) => {
-        self.send_i16f16(f);
-        self.send_nl();
-        Some(f)
+        Ok(f)
       }
     }
   }
-
-  fn set_param(&mut self, word: &str) {
-    match word[2..].parse::<I16F16>() {
-      Err(_) => self.send("Unable to parse float after command\r\n"),
+  fn parse_integer(&mut self, word: &str, text: &str) -> Result<i32> {
+    match word.parse::<i32>() {
+      Err(_) => {
+        rprintln!("Error: For:{} unable to parse integer:{}", text, word);
+        Err(EFocSimpleError::SerialParseError)
+      }
       Ok(f) => {
-        let mode = match self.foc_mode {
-          EFocModeLocal::Angle => "Angle",
-          EFocModeLocal::Velocity => "Velocity",
-          EFocModeLocal::Torque => "Torque",
-          _ => "Invalid, choose mode first",
-        };
-        let p = match self.foc_mode {
-          EFocModeLocal::Angle => &mut self.param_a,
-          EFocModeLocal::Velocity => &mut self.param_v,
-          EFocModeLocal::Torque => &mut self.param_t,
-          _ => &mut PidParam::new(I16F16::ZERO, I16F16::ZERO, I16F16::ZERO),
-        };
-        match &word[0..2] {
-          "kp" => p.set_p(f),
-          "ki" => p.set_i(f),
-          "kd" => p.set_d(f),
-          _ => (),
-        };
-        self.send("Set pid parameters for mode:");
-        self.send(mode);
-        self.send(" ");
-        self.send(&word[0..2]);
-        self.send(" = ");
-        self.send_i16f16(f);
-        self.send_nl();
-        self.select_mode(self.foc_mode);
+        Ok(f)
       }
     }
   }
@@ -280,34 +359,73 @@ where
         let dir = if f >= 0 {EDir::Cw} else {EDir::Ccw};
         self.param_c = Some(CalParams::new(dir, I16F16::from_num(f.abs())));
         self.senders[self.motor_nr].try_send(
-          EFocCommand::FocMode(
-            EFocMode::Calibration(self.param_c.clone())
+          EFocCommand::MotionControl(
+            EFocMode::Calibration(self.param_c.clone()), true
           )).ok();
       }
     }
   }
-
-  pub fn help(&mut self) {
-    self.send("\r\nHow to use  ... \r\n");
-    self.send("  he        -- help this message\r\n");
-    self.send("  ts<float> -- set target speed in turns/s\r\n");
-    self.send("  ta<float> -- set target angle. Range 0 .. TAU\r\n");
-    self.send("  tp<float> -- set target position Range -31K . 31K TAU \r\n");
-    self.send("  tt<float> -- set target torque. Range 0..1\r\n");
-    self.send("  tl<float> -- set max torque limit. Range 0..1\r\n");
-    self.send("  pa<float> -- set speed acceleration in turns/sec2\r\n");
-    self.send("  np<int>   -- set motor pole count\r\n");
-    self.send("  mc        -- mode calibration. Start with this function!\r\n");
-    self.send("  mi        -- mode idle\r\n");
-    self.send("  mv        -- mode velocity\r\n");
-    self.send("  mo        -- mode open loop velocity\r\n");
-    self.send("  mt        -- mode torque\r\n");
-    self.send("  m0        -- select motor 0\r\n");
-    self.send("  m1        -- select motor 1\r\n");
-    self.send("  co        -- calibration offset. Only for test cases!\r\n");
-    self.send("  kp<float> -- pid P\r\n");
-    self.send("  ki<float> -- pid I\r\n");
-    self.send("  kd<float> -- pid D\r\n");
-    self.send("  ec        -- Show error count on rtt channel and reset\r\n");
+  fn handle_from_foc(&mut self, f:EFocCommand) {
+    let mut msg: String<100> = String::new();
+    match f {
+      EFocCommand::Pid(p, _) => {
+        let (param, pid_id) = match p {
+            EPid::CurrentQ(pid_param) => (pid_param, "Q"),
+            EPid::CurrentD(pid_param)=> (pid_param, "D"),
+            EPid::Velocity(pid_param)=> (pid_param, "V"),
+            EPid::Angle(pid_param)=> (pid_param, "A"),
+        };
+        let (pp, parm_id) = match param  {
+          EPidParameter::P(v)=> (v, "P"),
+          EPidParameter::I(v)=> (v, "I"),
+          EPidParameter::D(v)=> (v, "D"),
+          EPidParameter::Limit(v)=> (v, "L"),
+          EPidParameter::Ramp(v)=> (v, "R"),
+          EPidParameter::Filter(v)=> (v, "F"),
+        };
+        let result:f32 = pp.to_num();
+        core::write!(&mut msg, "{}{}{}{:.4}\r\n",self.motor_nr,pid_id,parm_id,result).unwrap();
+      }
+      EFocCommand::Limit(l,_) => {
+        let (pp, limit_id) = match l {
+          EFocLimit::Current(v)=> (v, "C"),
+          EFocLimit::Voltage(v)=> (v, "U"),
+          EFocLimit::Velocity(v)=> (v, "V"),
+          EFocLimit::Acceleration(v)=> (v, "A"),
+        };
+        let result:f32 = pp.to_num();
+        core::write!(&mut msg, "{}L{}{:.4}\r\n",self.motor_nr, limit_id,result).unwrap();
+      }
+      EFocCommand::MotionControl(m,_) => {
+        let mode = match m {
+          EFocMode::Torque => "0",
+          EFocMode::Velocity(false) => "1",
+          EFocMode::Angle(false)=> "2",
+          EFocMode::Velocity(true)=> "3",
+          EFocMode::Angle(true)=> "4",
+          _ => "6"
+        };
+        core::write!(&mut msg, "{}C{}\r\n",self.motor_nr,mode).unwrap();
+      }
+      EFocCommand::EnableStatus(s,_) => {
+        core::write!(&mut msg, "{}E{}\r\n",self.motor_nr, if s {1} else {0}).unwrap();
+      }
+      EFocCommand::Monitor(EFocMonitor::Sample(samples), _) => {
+        let len = samples.len() as isize - 1;
+        core::write!(&mut msg, "{:?}",self.motor_nr).unwrap();
+        let mut i = 0;
+        for m in samples {
+            if i < len {
+              core::write!(&mut msg, "{:.4}\t",m).unwrap();
+            } else {
+              core::write!(&mut msg, "{:.4}",m).unwrap();
+            } 
+            i += 1;
+        }
+        core::write!(&mut msg, "{:?}\r\n",self.motor_nr).unwrap();
+      } 
+      _ => ()
+    }
+    self.send(&msg);
   }
-  }
+}

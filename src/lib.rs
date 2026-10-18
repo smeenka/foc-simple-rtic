@@ -2,29 +2,63 @@
 #![allow(dead_code)]
 use core::future::Future;
 use fixed::types::I16F16;
-use crate::tools::shaft_position::ShaftPosition;
+use heapless::Vec;
+use crate::{foc::EFocMode, tools::shaft_position::ShaftPosition};
 
 pub use crate::tools::foc_command_line::FocCommandLine;
 pub mod foc;
 pub mod tools;
-pub mod vesc_slave;
 
-pub const COMMAND_QUEUE_LEN:usize = 5;
+pub const COMMAND_QUEUE_RX:usize = 50; // foc => command_line
+pub const COMMAND_QUEUE_TX:usize = 10; // command_line => foc
+
 
 #[derive(Clone, Debug, Copy, PartialEq)]
-pub enum EFocCommand {
-  FocMode(foc::EFocMode),       // select the foc mode: idle, calibration, velocity, angle, torque
-  Speed(I16F16),                // speed mode: set speed in turns/s
-  SpeedAcc(I16F16),             // speed mode: set acceleration in turns/s*s
-  Angle(I16F16),                // angle modeL: set the requested angle in 0 ..TAU 
-  Torque(I16F16),               // torque modeL set the target torque
-  ShaftPosition(ShaftPosition), // angle mode: set the requested target postion: rotations and angle
-  TorqueLimit(I16F16),          // all modes: limit the max torque which is send to the current controller
-  NrPoles(u8),                  // idle modeL: set the nr of poles. Note: a calibration is needed after changing the number of poles
-  ErrorCount,                   // show the error count on the rtt channel, and reset to zero
+pub enum EPidParameter {
+  P(I16F16), // proportional gain
+  I(I16F16), // integration gain
+  D(I16F16), // derivative gain
+  Limit(I16F16), // saturation limit
+  Ramp(I16F16), // ramp parameter
+  Filter(I16F16), // low pass filtering time constant
 }
 
 #[derive(Clone, Debug, Copy, PartialEq)]
+pub enum EPid {
+  CurrentQ(EPidParameter),
+  CurrentD(EPidParameter),
+  Velocity(EPidParameter),
+  Angle(EPidParameter),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EFocLimit {
+  Current(I16F16), // abs current limit in ampere
+  Voltage(I16F16), // abs voltage limit as output by the motion controller 0..1
+  Velocity(I16F16), // abs velocity limit in radians/sec
+  Acceleration(I16F16)// acceleration limit in velocity mode in radians/sec2
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EFocMonitor {
+  DownSample(u32),   // down sample. 0 is off
+  Set([bool;7]),     // enable /disable the 7 7 monitored variablen 
+  Sample(Vec<I16F16, 7>)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum EFocCommand {
+  Pid(EPid, bool),               // Get or Set a pid paramter
+  Limit(EFocLimit, bool),       // Get or Set a foc limit   
+  MotionControl(EFocMode, bool),// Get or set the mode for the motion controller
+  Monitor(EFocMonitor, bool),         // Set the monitor status
+  EnableStatus(bool, bool),     // Get or set the enalbe status, first bool is enable status, second bool the setter
+  Target(I16F16, Option<I16F16>, Option<I16F16>),  // target speed, angle or torque with optional torque limit and optional velocity limit
+  NrPoles(u8),                  // idle mode: set the nr of poles. Note: a calibration is needed after changing the number of poles
+  ErrorCount,                   // show the error count on the rtt channel, and reset to zero
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EFocSimpleError {
   Uninitialized,
   NoMagWarning,
@@ -37,6 +71,7 @@ pub enum EFocSimpleError {
   NoCurrentSensor,
   NotImplementedYet,
   NoData,
+  SerialParseError,
   VescParseError,
   VescCrcError,
   Error,

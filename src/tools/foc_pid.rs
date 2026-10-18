@@ -1,6 +1,6 @@
 use fixed::types::I16F16;
 
-use crate::tools::shaft_position::ShaftPosition;
+use crate::{EPidParameter, tools::shaft_position::ShaftPosition};
 
 /// A fixed-point PID controller.
 /// note that the time element is omitted. The delta time is very constant in the foc controller
@@ -23,7 +23,7 @@ pub struct FocPid {
 
 impl FocPid {
   pub fn default() -> Self {
-    FocPid::new(I16F16::ONE, I16F16::ZERO, I16F16::ZERO)
+    FocPid::new(I16F16::ONE/10, I16F16::ZERO, I16F16::ZERO)
   }
   /// Create a new PID controller with the given gains.
   pub fn new(kp: I16F16, ki: I16F16, kd: I16F16) -> Self {
@@ -37,6 +37,24 @@ impl FocPid {
       integral_max_n: -1 * I16F16::ONE,
       integral_max_p: 1 * I16F16::ONE,
       ready: false,
+    }
+  }
+  pub fn pid_param(&mut self, param: EPidParameter, do_set: bool) -> EPidParameter {
+    match param {
+      EPidParameter::P(p) =>{
+        if do_set { self.kp = p  }
+        EPidParameter::P(self.kp)
+      }
+      EPidParameter::I(i) =>{
+        if  do_set { self.ki = i }
+        EPidParameter::I(self.ki)
+      }
+      EPidParameter::D(d) =>{
+        if do_set { self.kd = d }
+        EPidParameter::D(self.kd)
+      }
+       // all other parameters not yet implemented, return incoming value
+      _ => param
     }
   }
 

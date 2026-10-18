@@ -8,7 +8,7 @@ pub const COMMAND_CHANNEL_SIZE: usize = 25;
 use fixed::types::I16F16;
 pub use foc_hall_sensor::FocHallSensor;
 
-use crate::{EFocSimpleError, PidParam, Result};
+use crate::{EFocSimpleError, Result};
 
 #[derive(Clone, Debug, Copy)]
 pub enum EModulation {
@@ -54,9 +54,9 @@ impl CalParams {
 pub enum EFocMode {
   Idle,
   Calibration(Option<CalParams>),
-  Velocity(PidParam, bool),
-  Angle(PidParam),
-  Torque(PidParam),
+  Velocity(bool),
+  Angle(bool),
+  Torque,
   Error(EFocSimpleError),
 }
 
