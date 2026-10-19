@@ -9,7 +9,7 @@ use rtic_monotonics::systick::prelude::*;
 use rtt_target::{rprintln, rtt_init_default};
 use stm32f1xx_hal::gpio::Pin;
 use stm32f1xx_hal::pac::EXTI;
-use stm32f1xx_hal::pac::TIM2;
+use stm32f1xx_hal::pac::{TIM2, TIM3};
 
 systick_monotonic!(Mono, 1000);
 
@@ -51,6 +51,7 @@ mod app {
     hall2: PB14<Input<PullUp>>,
     hall3: PB10<Input<PullUp>>,
     timer2: CounterHz<TIM2>,
+    timer3: CounterHz<TIM3>,
     foc_pwm: FocPwm<PwmDriverImpl>, 
     command_line: FocCommandLine<FocSerialImpl>,
     receiver1: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>
@@ -82,11 +83,18 @@ mod app {
     // disable jtag
     let (pa15, _pb3, _pb4) = afio.mapr.disable_jtag(gpioa.pa15, gpiob.pb3, gpiob.pb4);
 
-    // Instantiate TIM2 that will be used to create the a fast ticker, simulating the pwm  clock
+    // Instantiate TIM2 that will be used to create the a fast ticker, 
     let mut timer2 = cx.device.TIM2.counter_hz(&mut rcc);
     timer2.start(5000.Hz()).unwrap();
     // Generate an interrupt when the timer expires
     timer2.listen(Event::Update);
+
+    // Instantiate TIM3 that will be used to create the 100 hz ticker
+    let mut timer3 = cx.device.TIM3.counter_hz(&mut rcc);
+    timer3.start(100.Hz()).unwrap();
+    // Generate an interrupt when the timer expires
+    timer3.listen(Event::Update);
+
 
     let mut hall1 = pa15.into_pull_up_input(&mut gpioa.crh);
     hall1.make_interrupt_source(&mut afio);
@@ -170,7 +178,6 @@ mod app {
     // Schedule the blinking task
     blink_task::spawn().ok();
     receiver1_task::spawn().ok();
-    ticker_task::spawn().ok();
     command_line_task::spawn().ok();
 
     (
@@ -181,6 +188,7 @@ mod app {
         hall2,
         hall3,
         timer2,
+        timer3,
         foc_pwm,
         command_line,
         receiver1,
@@ -198,20 +206,6 @@ mod app {
     }
   }
 
-  // task checking the incoming commands from the queue
-  #[task(shared=[foc_simple], priority = 2)]
-  async fn ticker_task(mut cx: ticker_task::Context) {
-    rprintln!("Starting ticker task");
-    let mut now = Mono::now();
-    loop {
-      cx.shared.foc_simple.lock(|foc| {
-        foc.update_velocity();
-        foc.check_receiver();
-      });
-      now += 10.millis();
-      Mono::delay_until(now).await;
-    }
-  }
 
   #[task(local = [command_line], priority = 1)]
   async fn command_line_task(context: command_line_task::Context) {
@@ -255,9 +249,9 @@ mod app {
   }
   // ticker task generating signals with 25 Khrz 
   #[task(binds=TIM2, local=[timer2, foc_pwm],shared=[foc_simple], priority = 4)]
-  fn timer_task(mut cx: timer_task::Context) {
+  fn timer2_task(mut cx: timer2_task::Context) {
     cx.shared.foc_simple.lock(|foc| {
-      match  foc.inner_loop(){
+      match  foc.update_mode_controller(){
         Ok((ele_angle, torque)) => {
           _ = cx.local.foc_pwm.update(ele_angle, torque, None);
         }
@@ -266,5 +260,17 @@ mod app {
     });
     cx.local.timer2.clear_interrupt(Event::Update);
   }
+
+
+  // ticker task generating signals with 25 Khrz 
+  #[task(binds=TIM3, local=[timer3],shared=[foc_simple], priority = 4)]
+  fn timer3_task(mut cx: timer3_task::Context) {
+    cx.shared.foc_simple.lock(|foc| {
+      foc.update_100hz();
+      foc.handle_command_queue();
+    });
+    cx.local.timer3.clear_interrupt(Event::Update);
+  }
+
 
 }

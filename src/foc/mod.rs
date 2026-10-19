@@ -1,6 +1,8 @@
 pub mod foc_hall_sensor;
 pub mod foc_pwm;
 pub mod foc_simple;
+pub mod foc_100hz_controller;
+pub mod foc_command;
 
 pub const MAX_MOTOR_NR: usize = 2;
 pub const COMMAND_CHANNEL_SIZE: usize = 25;

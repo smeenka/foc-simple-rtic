@@ -12,7 +12,6 @@ pub mod tools;
 pub const COMMAND_QUEUE_RX:usize = 50; // foc => command_line
 pub const COMMAND_QUEUE_TX:usize = 10; // command_line => foc
 
-
 #[derive(Clone, Debug, Copy, PartialEq)]
 pub enum EPidParameter {
   P(I16F16), // proportional gain
@@ -43,6 +42,7 @@ pub enum EFocLimit {
 pub enum EFocMonitor {
   DownSample(u32),   // down sample. 0 is off
   Set([bool;7]),     // enable /disable the 7 7 monitored variablen 
+  Get(I16F16),          // request to return a monitor value
   Sample(Vec<I16F16, 7>)
 }
 

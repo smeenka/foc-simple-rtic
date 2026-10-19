@@ -159,14 +159,14 @@ where
 
   pub fn send_usize(&mut self, data: usize) {
     let mut msg: String<10> = String::new();
-    core::write!(&mut msg, "{}", data).unwrap();
+    _ = core::write!(&mut msg, "{}", data);
     self.send(&msg);
   }
 
   pub fn send_i16f16(&mut self, data: I16F16) {
     let mut msg: String<20> = String::new();
     //let data: f32 = data.to_num();
-    core::write!(&mut msg, "{}", data).unwrap();
+    _ = core::write!(&mut msg, "{}", data);
     self.send(&msg);
   }
 
@@ -245,10 +245,19 @@ where
     let command = match &m[2..3] {
       "D" => EFocMonitor::DownSample(value as u32),
       "C" => EFocMonitor::Set([false;7]),
-      "S" => EFocMonitor::Set([
-          value & 1 == 1, value & 2 ==2, value & 4 ==4, value &8 ==8, value & 0x10 == 0x10,
-          value & 0x20 == 0x20, value & 0x40 == 0x40 
-        ]),
+      "S" => {
+        if m.len() < 10 {
+          return Err(EFocSimpleError::SerialParseError)
+        }
+        let mut var_set = [false;7];
+        for i in 0..7 {
+          if &m[i+3..i+4] == "1" {
+            var_set[i] = true;
+          }
+        }
+        EFocMonitor::Set(var_set)
+      }
+      "G" => EFocMonitor::Get(I16F16::from_num(value)),
       "V" => {self.verbose = value as u32;
         rprintln!("Set Verbose to:0x{:x}", value);
         return Err(EFocSimpleError::NotImplementedYet)
@@ -384,7 +393,7 @@ where
           EPidParameter::Filter(v)=> (v, "F"),
         };
         let result:f32 = pp.to_num();
-        core::write!(&mut msg, "{}{}{}{:.4}\r\n",self.motor_nr,pid_id,parm_id,result).unwrap();
+        _ = core::write!(&mut msg, "{}{}{}{:.4}\r\n",self.motor_nr,pid_id,parm_id,result);
       }
       EFocCommand::Limit(l,_) => {
         let (pp, limit_id) = match l {
@@ -394,7 +403,7 @@ where
           EFocLimit::Acceleration(v)=> (v, "A"),
         };
         let result:f32 = pp.to_num();
-        core::write!(&mut msg, "{}L{}{:.4}\r\n",self.motor_nr, limit_id,result).unwrap();
+        _ = core::write!(&mut msg, "{}L{}{:.4}\r\n",self.motor_nr, limit_id,result);
       }
       EFocCommand::MotionControl(m,_) => {
         let mode = match m {
@@ -405,24 +414,24 @@ where
           EFocMode::Angle(true)=> "4",
           _ => "6"
         };
-        core::write!(&mut msg, "{}C{}\r\n",self.motor_nr,mode).unwrap();
+        _ =core::write!(&mut msg, "{}C{}\r\n",self.motor_nr,mode); 
       }
       EFocCommand::EnableStatus(s,_) => {
-        core::write!(&mut msg, "{}E{}\r\n",self.motor_nr, if s {1} else {0}).unwrap();
+        _ = core::write!(&mut msg, "{}E{}\r\n",self.motor_nr, if s {1} else {0});
       }
       EFocCommand::Monitor(EFocMonitor::Sample(samples), _) => {
         let len = samples.len() as isize - 1;
-        core::write!(&mut msg, "{:?}",self.motor_nr).unwrap();
+        _ = core::write!(&mut msg, "{:?}",self.motor_nr);
         let mut i = 0;
         for m in samples {
             if i < len {
-              core::write!(&mut msg, "{:.4}\t",m).unwrap();
+              _ =core::write!(&mut msg, "{:.4}\t",m);
             } else {
-              core::write!(&mut msg, "{:.4}",m).unwrap();
+              _ = core::write!(&mut msg, "{:.4}",m);
             } 
             i += 1;
         }
-        core::write!(&mut msg, "{:?}\r\n",self.motor_nr).unwrap();
+        _ = core::write!(&mut msg, "{:?}\r\n",self.motor_nr);
       } 
       _ => ()
     }
