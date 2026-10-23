@@ -22,7 +22,7 @@ mod app {
   use foc_simple_rtic::foc::foc_simple::FocSimple;
   use foc_simple_rtic::foc::foc_pwm::FocPwm;
   use foc_simple_rtic::foc::{EFocMode, EModulation };
-  use foc_simple_rtic::{EFocAngleSensor, SensorAngle, COMMAND_QUEUE_LEN, EFocCommand, FocCommandLine,};
+  use foc_simple_rtic::{EFocAngleSensor, SensorAngle, COMMAND_QUEUE_RX, COMMAND_QUEUE_TX, EFocCommand, FocCommandLine,};
   use rtic_monotonics::fugit::{Instant, Rate, RateExtU32};
   use storm32::foc_impl::pwm_driver::{LeftDriverImpl, RightDriverImpl};
   use storm32::foc_impl::{FocSerialImpl, SensorAngleLeft, SensorAngleRight, SensorCurrentImpl};
@@ -52,15 +52,13 @@ mod app {
 
   #[shared]
   struct Shared {
-    foc_l: FocSimple,
-    foc_r: FocSimple,
+    foc_l: FocSimple<LeftDriverImpl>,
+    foc_r: FocSimple<RightDriverImpl>,
   }
 
   #[local]
   struct Local {
     led: PB12<Output<PushPull>>,
-    pwm_l: FocPwm<LeftDriverImpl>,
-    pwm_r: FocPwm<RightDriverImpl>,
     sensor_l: SensorAngleLeft,
     sensor_r: SensorAngleRight,
     command_line: FocCommandLine<FocSerialImpl>,
@@ -150,19 +148,12 @@ mod app {
     let parser = FocSerialImpl::new(tx, rx);
 
     // setup the message channels for left and right
-    let (sender_l, receiver_l) = make_channel!(EFocCommand, COMMAND_QUEUE_LEN);
-    let (sender_r, receiver_r) = make_channel!(EFocCommand, COMMAND_QUEUE_LEN);
+    let (sender_l, receiver_l) = make_channel!(EFocCommand, COMMAND_QUEUE_TX);
+    let (sender_r, receiver_r) = make_channel!(EFocCommand, COMMAND_QUEUE_TX);
+    let (sender_retour, receiver_retour) = make_channel!(EFocCommand, COMMAND_QUEUE_RX);
+
     let senders = [sender_l, sender_r];
-    let command_line = FocCommandLine::new(parser, senders);
-
-    // setup the foc_simple implementations
-    let mut foc_l = FocSimple::new(receiver_l);
-    foc_l.set_nr_poles(7);
-    foc_l.set_inner_loop_hz(1000);
-
-    let mut foc_r = FocSimple::new(receiver_r);
-    foc_r.set_nr_poles(7);
-    foc_r.set_inner_loop_hz(1000);
+    let command_line = FocCommandLine::new(parser, senders, receiver_retour);
 
     //              motor 0       motor 1    motor 2
     // ---------------------------------------------
@@ -190,7 +181,7 @@ mod app {
     let max = channels3.0.get_max_duty();
     rprintln!("Max duty:{}", max);
     let pwm_driver_l = LeftDriverImpl::new(channels3.2, channels3.1, channels3.0);
-    let pwm_l = FocPwm::new(pwm_driver_l, EModulation::Sinusoidal, max, 1.0);
+    let pwm_l = FocPwm::new(pwm_driver_l, max, 1.0);
 
     // right wheel
     // a0 is not used for pwm, but needed to let the pwm2.split() succeed
@@ -207,7 +198,18 @@ mod app {
     let channels2 = pwm2.split();
 
     let pwm_driver_r = RightDriverImpl::new(channels2.0, channels2.1, channels2.2);
-    let pwm_r = FocPwm::new(pwm_driver_r, EModulation::Sinusoidal, max, 1.0);
+    let pwm_r = FocPwm::new(pwm_driver_r, max, 1.0);
+
+    // setup the foc_simple implementations
+    let mut foc_l = FocSimple::new(receiver_l, sender_retour.clone(), pwm_l);
+    foc_l.set_nr_poles(7);
+    foc_l.set_inner_loop_hz(1000);
+
+    let mut foc_r = FocSimple::new(receiver_r, sender_retour, pwm_r);
+    foc_r.set_nr_poles(7);
+    foc_r.set_inner_loop_hz(1000);
+
+
 
     // Schedule the blinking task
     command_task::spawn().ok();
@@ -219,8 +221,6 @@ mod app {
       Shared { foc_l, foc_r },
       Local {
         led,
-        pwm_l,
-        pwm_r,
         sensor_l,
         sensor_r,
         command_line,
@@ -248,12 +248,12 @@ mod app {
     let mut now = Mono::now();
     loop {
       cx.shared.foc_l.lock(|foc| {
-        foc.update_velocity();
-        foc.check_receiver();
+        foc.update_100hz();
+        foc.handle_command_queue();
       });      
       cx.shared.foc_r.lock(|foc| {
-        foc.update_velocity();
-        foc.check_receiver();
+        foc.update_100hz();
+        foc.handle_command_queue();
       });
       now += 10.millis();
       Mono::delay_until(now).await;
@@ -266,24 +266,20 @@ mod app {
   }
 
   // ticker task generating signals with 1000 hrz
-  #[task(binds=TIM1_UP, local=[timer1, pwm_l, pwm_r ], shared=[foc_l, foc_r], priority = 4)]
+  #[task(binds=TIM1_UP, local=[timer1 ], shared=[foc_l, foc_r], priority = 4)]
   fn tim1_task(mut cx: tim1_task::Context) {
     // high speed inner loop for left
     cx.shared.foc_l.lock(|foc| {
-      match  foc.inner_loop(){
-        Ok((ele_angle, torque)) => {
-          _ = cx.local.pwm_l.update(ele_angle, torque, None);
-        }
+      match  foc.update_foc(){
+        Ok(_) => (),
         Err(e) => rprintln!("Error:{:?}", e)
       };
     });
     // high speed inner loop for right
      
     cx.shared.foc_r.lock(|foc| {
-      match  foc.inner_loop(){
-        Ok((ele_angle, torque)) => {
-          _ = cx.local.pwm_r.update(ele_angle, torque, None);
-        }
+      match  foc.update_foc(){
+        Ok(_) => (),
         Err(e) => rprintln!("Error:{:?}", e)
       };
     });

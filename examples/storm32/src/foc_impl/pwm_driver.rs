@@ -29,6 +29,7 @@ impl PwmDriver for LeftDriverImpl {
       self.c.set_duty(phases[2]);
       Ok(())
     }
+    fn set_enabled(&mut self, enabled: bool) {}
 }
 
 pub struct RightDriverImpl {
@@ -57,4 +58,5 @@ impl PwmDriver for RightDriverImpl {
       self.c.set_duty(phases[2]);
       Ok(())
     }
+    fn set_enabled(&mut self, enabled: bool) {}
 }

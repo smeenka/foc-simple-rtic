@@ -89,7 +89,7 @@ mod app {
     let led = gpiob.pb12.into_push_pull_output(&mut gpiob.crh);
 
     // Instantiate TIM1 that will be used to create the 5 Khz  clock
-    let mut timer1ms = cx.device.TIM6.counter_hz(&mut rcc);
+    let mut timer1ms = cx.device.TIM1.counter_hz(&mut rcc);
     timer1ms.start(5000.Hz()).unwrap();
     // Generate an interrupt when the timer expires
     timer1ms.listen(Event::Update);
@@ -140,32 +140,25 @@ mod app {
     // Enable clock on each of the channels
     let max = channels3.0.get_max_duty();
     rprintln!("Max duty:{}", max);
-    let pwm_driver_l = LeftDriverImpl::new(channels3.0, channels3.1, channels3.2);
-    let pwm_l = FocPwm::new(pwm_driver_l, EModulation::Sinusoidal, max, 0.4);
+    let pwm_driver_l = LeftDriverImpl::new(channels3.2, channels3.1, channels3.0);
+    let pwm_l = FocPwm::new(pwm_driver_l,  max, 0.4);
 
     // right wheel
     // a0 is not used for pwm, but needed to let the pwm2.split() succeed
-    let a0 = gpioa.pa0.into_alternate_push_pull(&mut gpioa.crl);
+    // a1 connected to m2B
     let a1 = gpioa.pa1.into_alternate_push_pull(&mut gpioa.crl);
-    let pins2 = (a0, a1);
+    let a2 = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
+    let a3 = gpioa.pa3.into_alternate_push_pull(&mut gpioa.crl);
+    let pins3 = (a1, a2, a3);
     let pwm2 = cx
       .device
       .TIM2
-      .pwm_hz::<Tim2NoRemap, _, _>(pins2, &mut afio.mapr, 25.kHz(), &mut rcc);
+      .pwm_hz::<Tim2NoRemap, _, _>(pins3, &mut afio.mapr, 25.kHz(), &mut rcc);
 
     let channels2 = pwm2.split();
 
-    let b8 = gpiob.pb8.into_alternate_push_pull(&mut gpiob.crh);
-    let b9 = gpiob.pb9.into_alternate_push_pull(&mut gpiob.crh);
-    let pins4 = (b8, b9);
-    let pwm4 = cx
-      .device
-      .TIM4
-      .pwm_hz::<Tim4NoRemap, _, _>(pins4, &mut afio.mapr, 25.kHz(), &mut rcc);
-    let channels4 = pwm4.split();
-
-    let pwm_driver_r = RightDriverImpl::new(channels2.1, channels4.0, channels4.1);
-    let pwm_r = FocPwm::new(pwm_driver_r, EModulation::Sinusoidal, max, 0.4);
+    let pwm_driver_r = RightDriverImpl::new(channels2.0, channels2.1, channels2.2);
+    let pwm_r = FocPwm::new(pwm_driver_r,  max, 0.4);
 
     // Schedule the blinking task
     blink_task::spawn().ok();
@@ -209,7 +202,7 @@ mod app {
 
 
   // ticker task generating signals with 5000 hrz
-  #[task(binds=TIM6, local=[timer1ms, sensor_l, sensor_r, pwm_l, pwm_r, counter, angle],  priority = 3)]
+  #[task(binds=TIM1_UP, local=[timer1ms, sensor_l, sensor_r, pwm_l, pwm_r, counter, angle],  priority = 3)]
   fn ticker_task(mut cx: ticker_task::Context) {
     let mut counter = cx.local.counter;
     let mut angle = cx.local.angle;
@@ -222,16 +215,17 @@ mod app {
       *angle = I6F26::ZERO;
     }
       let angle_16 = I16F16::from_num(*angle);
-    _ = cx.local.pwm_l.update(angle_16 * nr_poles, torque, None);
-    _ = cx.local.pwm_r.update(angle_16 * nr_poles, torque, None);
+      let (sin_angle, cos_angle) = cordic::sin_cos(angle_16);      
+    _ = cx.local.pwm_l.update_pwm(sin_angle, cos_angle, torque, I16F16::ZERO);
+    _ = cx.local.pwm_r.update_pwm(sin_angle, cos_angle, torque, I16F16::ZERO);
 
     if * counter > 49 {
       let measured_angle_l = cx.local.sensor_l.get_angle().unwrap();
       let measured_angle_r = cx.local.sensor_r.get_angle().unwrap();
       let d_l = measured_angle_l - angle_16;
       let d_r = measured_angle_r - angle_16;
-      //rprintln!(",angle:,{}, \tleft: meas:,{}, \td:,{},  \t\tright: meas:,{}, \td:,{} ", angle, measured_angle_l, d_l, measured_angle_r, d_r);
-      rprintln!("a:,angle");
+      rprintln!(",angle:,{}, \tleft: meas:,{}, \td:,{},  \t\tright: meas:,{}, \td:,{} ", angle, measured_angle_l, d_l, measured_angle_r, d_r);
+      //rprintln!("a:,angle");
       *counter = 0;
     } else {
       *counter += 1;
