@@ -27,17 +27,6 @@ impl PwmDriverImpl {
       enable_c,
     }
   }
-
-  pub fn enable(&mut self) {
-    self.enable_a.set_high();
-    self.enable_b.set_high();
-    self.enable_c.set_high();
-  }
-  pub fn disable(&mut self) {
-    self.enable_a.set_low();
-    self.enable_b.set_low();
-    self.enable_c.set_low();
-  }
 }
 
 impl PwmDriver for PwmDriverImpl {
@@ -47,6 +36,17 @@ impl PwmDriver for PwmDriverImpl {
     self.pwm_b.set_duty(phases[1]);
     self.pwm_c.set_duty(phases[2]);
     Ok(())
+  }
+  fn set_enabled(&mut self, enabled: bool) {
+    if enabled {
+      self.enable_a.set_high();
+      self.enable_b.set_high();
+      self.enable_c.set_high();
+    } else {
+      self.enable_a.set_low();
+      self.enable_b.set_low();
+      self.enable_c.set_low();
+    }
   }
   
 }

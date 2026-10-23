@@ -1,9 +1,9 @@
 use fixed::{types::{I16F16,I6F26, I32F32}} ;
 use heapless::Vec;
 //use rtt_target::rprintln;
-use crate::{EFocCommand, EFocMonitor, foc::foc_simple::FocSimple};
+use crate::{EFocCommand, EFocMonitor, foc::{PwmDriver, foc_simple::FocSimple}};
 
-impl FocSimple {
+impl<D> FocSimple<D>  where D: PwmDriver {
   pub fn update_100hz(&mut self){
     // calculate the actual speed from the acceleration and requested speed
     let req = self.target;
@@ -44,8 +44,8 @@ impl FocSimple {
               0 => self.target,
               1 => self.voltage_request,
               2 => self.voltage_d,
-              3 => self.monitor_i_q,
-              4 => self.monitor_i_d,
+              3 => self.current_q,
+              4 => self.current_d,
               5 => self.velocity,
               6 => I16F16::from_num(self.shaft_position_act.angle),
               _ => I16F16::ZERO

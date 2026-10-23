@@ -1,24 +1,27 @@
 use fixed::types::{I6F26, I16F16};
 
-use crate::{EFocCommand, EFocLimit, EFocMonitor, EPid, foc::{EDir, EFocMode, foc_simple::{ECalibrateState, FocSimple}}};
+use crate::{EFocCommand, EFocLimit, EFocMonitor, EPid, foc::{EDir, EFocCurrentMode, EFocMode, PwmDriver, foc_simple::{ECalibrateState, FocSimple}}};
 use rtt_target::rprintln;
 
-impl FocSimple {
+impl<D> FocSimple<D>  where D: PwmDriver {
     // user interface commands
   pub fn handle_command_queue(&mut self) {
     if let Ok(message) = self.receiver.try_recv() {
       let m = match message {
           EFocCommand::Pid(pid, setter) => Some(EFocCommand::Pid(self.pid_param(pid, setter), false)),
           EFocCommand::MotionControl(mode, setter ) => Some(EFocCommand::MotionControl(self.foc_mode(mode, setter), false)),
+          EFocCommand::CurrentControl(mode, setter ) => Some(EFocCommand::CurrentControl(self.current_mode(mode, setter), false)),
+          EFocCommand::Modulation(m) => {
+            self.foc_pwm.set_modulation(m);
+            None
+          },
+          EFocCommand::SensorOffset(offset, setter ) => Some(EFocCommand::SensorOffset(self.sensor_offset(offset, setter),false)),
           EFocCommand::Limit(limit, setter) => Some(EFocCommand::Limit(self.limits(limit, setter),false)),
           EFocCommand::NrPoles(n) => {
             self.set_nr_poles(n as usize);
             None}
-          EFocCommand::Target(target, torque, _velocity) =>{
+          EFocCommand::Target(target, _torque, _velocity) =>{
             self.set_target(target);
-            if let Some(t) = torque {
-              self.voltage_request = t.clamp(I16F16::ZERO, self.voltage_q_limit_pos);
-            }
             None
           }
           EFocCommand::ErrorCount => {
@@ -35,41 +38,51 @@ impl FocSimple {
     }
   }
 
-  pub fn foc_mode(&mut self, mode: EFocMode, _do_set: bool) -> EFocMode {
-    rprintln!("Set Foc mode:{:?}", mode);
-    self.foc_mode = mode;
-    self.target = I16F16::ZERO;
-    self.voltage_request = self.target;
-    match self.foc_mode {
-      EFocMode::Calibration(param) => match param {
-        Some(p) => {
-          self.electrical_offset = p.zero;
-          self.shaft_position_act.set_inversed(p.dir == EDir::Ccw);
-          self.foc_mode = EFocMode::Idle;
+  pub fn foc_mode(&mut self, mode: EFocMode, do_set: bool) -> EFocMode {
+    if do_set {
+      rprintln!("Set Foc mode:{:?}", mode);
+      self.foc_mode = mode;
+      self.target = I16F16::ZERO;
+      self.voltage_request = self.target;
+      self.voltage_d = I16F16::ZERO;
+
+      match self.foc_mode {
+        EFocMode::Calibration(param) => match param {
+          Some(p) => {
+            self.electrical_offset = p.zero;
+            self.angle_inversed = (p.dir == EDir::Ccw);
+            self.foc_mode = EFocMode::Idle;
+          }
+          None => {
+            self.angle_inversed = false;
+            self.calibration_state = ECalibrateState::Init;
+          }
+        },
+        EFocMode::Angle(_param) => {
+          self.pid_angle.set_integral_max(I16F16::ONE * 3);
         }
-        None => {
-          self.shaft_position_act.set_inversed(false);
-          self.calibration_state = ECalibrateState::Init;
+        EFocMode::Velocity(_) => {
+          self.speed_act = I16F16::ZERO;
+          self.speed_delta_inc = I6F26::ZERO;
+          self.pid_velocity.set_integral_max(I16F16::ONE * 20);
         }
-      },
-      EFocMode::Angle(_param) => {
-        self.pid_angle.set_integral_max(I16F16::ONE * 3);
-        self.shaft_position_req = self.shaft_position_act.clone();
+        EFocMode::Torque => (),     
+        EFocMode::Idle => (),
+        EFocMode::Error(_e) => (),
       }
-      EFocMode::Velocity(open_loop) => {
-        self.open_loop_velocity = open_loop;
-        self.speed_act = I16F16::ZERO;
-        self.speed_delta_inc = I6F26::ZERO;
-        self.shaft_position_req = self.shaft_position_act.clone();
-        self.pid_velocity.set_integral_max(I16F16::ONE * 20);
-        self.voltage_request = self.voltage_q_limit_pos;
-      }
-      EFocMode::Torque => (),     
-      EFocMode::Idle => (),
-      EFocMode::Error(_e) => (),
+      self.shaft_position_req = self.shaft_position_act.clone();
     }
     self.foc_mode
   }
+
+
+  pub fn current_mode(&mut self, mode: EFocCurrentMode, do_set: bool) -> EFocCurrentMode {
+    if do_set {
+      self.current_mode = mode;
+    }
+    self.current_mode
+  }
+
 
   fn pid_param(&mut self, parm: EPid, do_set: bool) -> EPid{
     let result = match parm {
@@ -82,10 +95,23 @@ impl FocSimple {
   }
   fn enabled(&mut self, is_enabled: bool, do_set: bool) -> bool{
     if do_set {
-      self.enabled = is_enabled;
+      self.foc_pwm.set_enabled(is_enabled);//self.enabled = is_enabled;
     }
-    self.enabled
+    self.foc_pwm.enabled()
   }
+
+  fn sensor_offset(&mut self, offset: I16F16, do_set: bool) -> I16F16{
+    if do_set {
+      self.electrical_offset = offset.abs();
+      self.angle_inversed = offset.is_negative();
+    }
+    if self.angle_inversed {
+      self.electrical_offset * -I16F16::ONE 
+    } else {
+      self.electrical_offset 
+    }
+  }
+
 
   fn limits(&mut self, limit: EFocLimit, do_set: bool) -> EFocLimit{
     let result = match limit {
@@ -102,7 +128,7 @@ impl FocSimple {
       }
       EFocLimit::Velocity(v) => {
         if do_set {
-          self.speed_delta_max = self.calculate_speed_delta_inc(v)
+          self.speed_delta_max = self.calculate_speed_delta_inc(v.abs())
         }
         EFocLimit::Voltage(I16F16::from_num(self.speed_delta_max) * self.inner_loop_hz)
       }

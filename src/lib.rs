@@ -3,7 +3,7 @@
 use core::future::Future;
 use fixed::types::I16F16;
 use heapless::Vec;
-use crate::{foc::EFocMode, tools::shaft_position::ShaftPosition};
+use crate::{foc::{EFocCurrentMode, EFocMode, EModulation}, tools::shaft_position::ShaftPosition};
 
 pub use crate::tools::foc_command_line::FocCommandLine;
 pub mod foc;
@@ -51,10 +51,13 @@ pub enum EFocCommand {
   Pid(EPid, bool),               // Get or Set a pid paramter
   Limit(EFocLimit, bool),       // Get or Set a foc limit   
   MotionControl(EFocMode, bool),// Get or set the mode for the motion controller
+  CurrentControl(EFocCurrentMode, bool),// Get or set the mode for the current controller
   Monitor(EFocMonitor, bool),         // Set the monitor status
-  EnableStatus(bool, bool),     // Get or set the enalbe status, first bool is enable status, second bool the setter
+  EnableStatus(bool, bool),     // Get or set the enable status, first bool is enable status, second bool the setter
+  SensorOffset(I16F16, bool),  // get or set the sensor offset, in range -TAU ..TAU
   Target(I16F16, Option<I16F16>, Option<I16F16>),  // target speed, angle or torque with optional torque limit and optional velocity limit
   NrPoles(u8),                  // idle mode: set the nr of poles. Note: a calibration is needed after changing the number of poles
+  Modulation(EModulation),
   ErrorCount,                   // show the error count on the rtt channel, and reset to zero
 }
 

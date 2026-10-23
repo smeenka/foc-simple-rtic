@@ -12,7 +12,7 @@ pub use foc_hall_sensor::FocHallSensor;
 
 use crate::{EFocSimpleError, Result};
 
-#[derive(Clone, Debug, Copy)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EModulation {
   /// Generate PWM values based on a sinusoidal waveform.
   ///
@@ -25,13 +25,15 @@ pub enum EModulation {
   /// resective channel should be disabled/set as high impedance.
   Trapezoidal,
   /// Generate PWM values based on a square wave.
-  Square,
-  SpaceVector,
+  //Square, not yet working, causes the motor to behave bad
+  SpaceVector, 
 }
 
 pub trait PwmDriver {
-  /// set the pwm duty cycles for A B and C.
+  /// set the pwm duty cycles for A B and C. on index 0,1,2
   fn set_pwm(&mut self, duty_cycles: [u16; 3]) -> Result<()>;
+  // enable or disable the pwm output stage. If disabled the outputs are of high impedance, sor the motor can freerun
+  fn set_enabled(&mut self, enabled: bool);
 }
 
 #[derive(Clone, Debug, Copy, PartialEq)]
@@ -60,5 +62,10 @@ pub enum EFocMode {
   Angle(bool),
   Torque,
   Error(EFocSimpleError),
+}
+#[derive(Clone, Debug, Copy, PartialEq)]
+pub enum EFocCurrentMode {
+  Voltage,
+  CurrentFeedback, 
 }
 

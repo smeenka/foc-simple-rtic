@@ -11,6 +11,7 @@ use stm32f1xx_hal::gpio::Pin;
 use stm32f1xx_hal::pac::EXTI;
 use stm32f1xx_hal::pac::TIM2;
 use stm32f1xx_hal::timer::pwm_input::PwmInput;
+use foc_simple_rtic::foc::PwmDriver;
 
 systick_monotonic!(Mono, 1000);
 
@@ -18,7 +19,7 @@ systick_monotonic!(Mono, 1000);
 mod app {
   use fixed::types::I16F16;
   use foc_simple_rtic::foc::{foc_pwm::FocPwm, EModulation};
-  use rtic_f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
+  use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
   use rtic_monotonics::fugit::{Rate, RateExtU32};
   use stm32f1xx_hal::{
     afio::AfioExt,
@@ -40,12 +41,13 @@ mod app {
   /* bring dependencies into scope */
 
   #[shared]
-  struct Shared {}
+  struct Shared {
+    foc_pwm: FocPwm<PwmDriverImpl>,
+  }
 
   #[local]
   struct Local {
     led: PB2<Output<PushPull>>,
-    foc_pwm: FocPwm<PwmDriverImpl>,
     timer2: CounterHz<TIM2>,
     angle: I16F16
   }
@@ -111,8 +113,8 @@ mod app {
       eb0.erase(),
       ec0.erase(),
     );
-    pwm_driver.enable();
-    let mut foc_pwm = FocPwm::new(pwm_driver, EModulation::Sinusoidal, max, 0.4);
+    pwm_driver.set_enabled(true);
+    let mut foc_pwm = FocPwm::new(pwm_driver, max, 0.4);
 
     // Instantiate TIM2 that will be used to create the a fast ticker, simulating the pwm  clock
     let mut timer2 = cx.device.TIM2.counter_hz(&mut rcc);
@@ -125,7 +127,7 @@ mod app {
     blink_task::spawn().ok();
     motor_task::spawn().ok();
 
-    (Shared {}, Local { led, foc_pwm, timer2, angle:I16F16::ZERO })
+    (Shared {foc_pwm }, Local { led, timer2, angle:I16F16::ZERO })
   }
 
   #[task(local = [led])]
@@ -135,23 +137,27 @@ mod app {
       Mono::delay(1000.millis()).await;
     }
   }
-  #[task()]
-  async fn motor_task(cx: motor_task::Context) {
+  #[task(shared=[foc_pwm])]
+  async fn motor_task(mut cx: motor_task::Context) {
     rprintln!("motor  with sinusoidal driver, 1/4 torque, one turn per second");
-    let mut curr_angle = I16F16::ZERO;
     loop {
-      curr_angle += I16F16::TAU / 1000;
-      if curr_angle >= I16F16::TAU {
-        curr_angle -= I16F16::TAU;
-      }
-
       // 2. Run the FOC algorithm
       //cx.local.foc_pwm.update(curr_angle, I16F16::ONE, None).unwrap();
-      Mono::delay(1.millis()).await;
+      Mono::delay(5.secs()).await;
+      rprintln!("Disable motor");
+      cx.shared.foc_pwm.lock(|pwm| {
+        pwm.set_enabled(false);
+      });
+      Mono::delay(5.secs()).await;
+      rprintln!("Enable motor");
+      cx.shared.foc_pwm.lock(|pwm| {
+        pwm.set_enabled(true);
+      });
+
     }
   }
 // ticker task generating signals with 25 Khrz 
-  #[task(binds=TIM2, local=[timer2, angle, foc_pwm], priority = 4)]
+  #[task(binds=TIM2, local=[timer2, angle], shared=[foc_pwm], priority = 4)]
   fn timer_task(mut cx: timer_task::Context) {
     let mut ang = *cx.local.angle;
     ang += I16F16::TAU / 1000;
@@ -160,8 +166,12 @@ mod app {
     }
     *cx.local.angle = ang;
 
+    let (sin_angle, cos_angle) = cordic::sin_cos(ang);
+
     // 2. Run the FOC algorithm
-    cx.local.foc_pwm.update(ang, I16F16::ONE, None).unwrap();
+    cx.shared.foc_pwm.lock(|pwm| {
+      pwm.update_pwm(sin_angle, cos_angle, I16F16::ONE, I16F16::ZERO);
+    });
     cx.local.timer2.clear_interrupt(Event::Update);
   }
 }

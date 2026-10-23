@@ -41,7 +41,7 @@ mod app {
 
   #[shared]
   struct Shared {
-    foc_simple: FocSimple
+    foc_simple: FocSimple<PwmDriverImpl>
   }
 
   #[local]
@@ -52,7 +52,6 @@ mod app {
     hall3: PB10<Input<PullUp>>,
     timer2: CounterHz<TIM2>,
     timer3: CounterHz<TIM3>,
-    foc_pwm: FocPwm<PwmDriverImpl>, 
     command_line: FocCommandLine<FocSerialImpl>,
     receiver1: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>
   }
@@ -142,10 +141,7 @@ mod app {
       eb0.erase(),
       ec0.erase(),
     );
-    pwm_driver.enable();
-
-
-    let mut foc_pwm = FocPwm::new(pwm_driver, EModulation::Sinusoidal, max, 1.0);
+    let mut foc_pwm = FocPwm::new(pwm_driver, max, 1.0);
 
     // USART2
     let pin_tx = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
@@ -172,7 +168,7 @@ mod app {
     let command_line = FocCommandLine::new(parser, senders, receiver_retour);
 
 
-    let mut foc_simple = FocSimple::new(receiver0, sender_retour);
+    let mut foc_simple = FocSimple::new(receiver0, sender_retour, foc_pwm);
     foc_simple.set_nr_poles(4);
 
     // Schedule the blinking task
@@ -189,7 +185,6 @@ mod app {
         hall3,
         timer2,
         timer3,
-        foc_pwm,
         command_line,
         receiver1,
       },
@@ -248,13 +243,11 @@ mod app {
     });
   }
   // ticker task generating signals with 25 Khrz 
-  #[task(binds=TIM2, local=[timer2, foc_pwm],shared=[foc_simple], priority = 4)]
+  #[task(binds=TIM2, local=[timer2],shared=[foc_simple], priority = 4)]
   fn timer2_task(mut cx: timer2_task::Context) {
     cx.shared.foc_simple.lock(|foc| {
-      match  foc.update_mode_controller(){
-        Ok((ele_angle, torque)) => {
-          _ = cx.local.foc_pwm.update(ele_angle, torque, None);
-        }
+      match  foc.update_foc(){
+        Ok(_) => (),
         Err(e) => rprintln!("Error:{:?}", e)
       };
     });

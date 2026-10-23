@@ -1,13 +1,14 @@
-use fixed::{types::{I16F16,I6F26}} ;
+use fixed::{types::{I16F16,I6F26, I48F16}} ;
 use rtt_target::rprintln;
 
 use crate::{
-  EFocSimpleError, Result, ShaftPosition, foc::{ EFocMode}, tools::foc_pid::FocPid,
+  EFocSimpleError, Result, ShaftPosition, foc::{ EFocCurrentMode, EFocMode, PwmDriver}, tools::foc_pid::FocPid,
 };
 use crate::{COMMAND_QUEUE_RX, COMMAND_QUEUE_TX, EFocCommand};
+use crate::foc::foc_pwm::FocPwm;
 use rtic_sync::channel::{Receiver, Sender};
 
-pub struct FocSimple {
+pub struct FocSimple<D: PwmDriver> {
   // user control
   pub(crate) receiver: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>,
   pub(crate) sender_retour: Sender<'static, EFocCommand, COMMAND_QUEUE_RX>,
@@ -25,7 +26,6 @@ pub struct FocSimple {
   // input state for the mode controller
   pub(crate) target: I16F16,
   pub(crate) shaft_position_req: ShaftPosition,
-  pub(crate) open_loop_velocity: bool,
 
   // internal state for the mode controller
   pub(crate) nr_poles: i32,
@@ -35,6 +35,7 @@ pub struct FocSimple {
   pub(crate) pid_angle: FocPid,
   pub(crate) pid_velocity: FocPid,
   pub(crate) foc_mode: EFocMode,
+  pub(crate) angle_inversed: bool,
   pub(crate) temp: I16F16,
   pub(crate) calibration_state: ECalibrateState,
  
@@ -43,9 +44,12 @@ pub struct FocSimple {
   pub(crate) electrical_angle: I16F16,
 
   // internal state for the current controller
-  pub(crate) enabled: bool,
+  pub(crate) foc_pwm: FocPwm<D>,
+  pub(crate) current_mode: EFocCurrentMode, 
   pub(crate) voltage_q :I16F16,
   pub(crate) voltage_d :I16F16,
+  pub(crate) current_q :I16F16,
+  pub(crate) current_d :I16F16,
   pub(crate) voltage_q_limit_neg: I16F16,
   pub(crate) voltage_q_limit_pos: I16F16,
   pub(crate) pid_current_d: FocPid,
@@ -53,19 +57,15 @@ pub struct FocSimple {
 
   // hall sensor related state
   pub(crate) hall_error_count: usize,
-  pub(crate) hall_step_idx: u8,  // the lowlevel hall state from 0 upto 5 are valid
-  pub(crate) hall_step_base: u8, // After eah full state transition ( 6 hall steps, this will increment or decrement)
-  pub(crate) hall_step_prev: u8,  
-  pub(crate) hall_step_max: u8,  // nr_poles * 6
-  pub(crate) hall_step_angle: I6F26, // TAU / (hall_state_max)  
+  hall_step_idx: u8,  // the lowlevel hall state from 0 upto 5 are valid
+  hall_step_base: u8, // After eah full state transition ( 6 hall steps, this will increment or decrement)
+  hall_step_prev: u8,  
+  hall_step_max: u8,  // nr_poles * 6
+  hall_step_angle: I6F26, // TAU / (hall_state_max)  
   // monitoring
   pub(crate) monitor_set: [bool;7],
   pub(crate) monitor_reload: u32,
   pub(crate) monitor_count: i32,
-  pub(crate) monitor_v_d: I16F16,
-  pub(crate) monitor_v_q: I16F16,
-  pub(crate) monitor_i_d: I16F16,
-  pub(crate) monitor_i_q: I16F16,
 }
 
 #[derive(Debug)]
@@ -77,8 +77,13 @@ pub(crate) enum ECalibrateState {
   ReturnToStart,
 }
 
-impl FocSimple {
-  pub fn new(receiver: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>,sender_retour:Sender<'static, EFocCommand, COMMAND_QUEUE_RX>) -> FocSimple {
+impl<D> FocSimple<D>
+where
+  D: PwmDriver {
+  pub fn new(
+    receiver: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>,
+    sender_retour:Sender<'static, EFocCommand, COMMAND_QUEUE_RX>,
+    foc_pwm: FocPwm<D>) -> FocSimple<D> {
     FocSimple {
       receiver,
       sender_retour,
@@ -94,7 +99,6 @@ impl FocSimple {
       // input state for the mode controller
       target: I16F16::ZERO,
       shaft_position_req: ShaftPosition::new(),
-      open_loop_velocity: true,
 
       // internal state for the mode controller
       nr_poles: 1,  
@@ -106,15 +110,19 @@ impl FocSimple {
       foc_mode: EFocMode::Idle,
       temp: I16F16::ZERO,
       calibration_state: ECalibrateState::Init,
+      angle_inversed: false,
 
       // Output state for the mode controller, input state for the current controller
       voltage_request :I16F16::ZERO,
       electrical_angle: I16F16::ZERO,
   
       // internal state for the current controller
-      enabled: false,
+      foc_pwm,
+      current_mode: EFocCurrentMode::Voltage, 
       voltage_q :I16F16::ZERO,
       voltage_d :I16F16::ZERO,
+      current_q :I16F16::ZERO,
+      current_d :I16F16::ZERO,
       voltage_q_limit_neg: I16F16::ONE/-2,
       voltage_q_limit_pos: I16F16::ONE/2,
       pid_current_d: FocPid::default(),
@@ -131,20 +139,16 @@ impl FocSimple {
       monitor_set: [false;7],
       monitor_count:1,
       monitor_reload:0, // default OFF
-      monitor_v_d: I16F16::ZERO,
-      monitor_v_q: I16F16::ONE/10,
-      monitor_i_d: I16F16::ONE/100,
-      monitor_i_q: I16F16::ONE/1000,
     }
   }
 
   /// Set the target value
-  /// Angle mode: set the angle in range 0 .. TAU
+  /// Angle mode: set the position. The actual position is never reset, so beware that after velocity or torque mode, the amount of rotations can be vast 
   /// Torque mode: set the torque in range torque_limit_neg .. torque_limit_pos
   pub fn set_target(&mut self, target: I16F16) {
     self.target = target;
     match self.foc_mode {
-      EFocMode::Angle(_) => self.shaft_position_req.angle = I6F26::from_num(target).clamp(I6F26::ZERO, I6F26::TAU),
+      EFocMode::Angle(_) => self.shaft_position_req.set_position(I48F16::from_num(target)),
       EFocMode::Torque => {
         self.target = target.clamp(self.voltage_q_limit_neg, self.voltage_q_limit_pos);
         self.voltage_request = self.target;
@@ -158,11 +162,6 @@ impl FocSimple {
     if let EFocMode::Angle(_) = self.foc_mode {
       self.shaft_position_req = position;
     }
-  }
-  /// only to be used for test function. Be carefull with setting the value manually!
-  /// Incorrect use can damage the motor.
-  pub fn set_electrical_offset(&mut self, offset: I16F16) {
-    self.electrical_offset = offset;
   }
   pub fn set_nr_poles(&mut self, nr: usize) {
     if let EFocMode::Idle = self.foc_mode {
@@ -196,33 +195,29 @@ impl FocSimple {
     self.shaft_position_req = req;
   }
 
-
-
   /// update the state of the foc controller. as fast as possible
-  /// Returned is a tuple of the electrical angle, and the requested torque 
-  /// Angle in radians, torque from -1 .. 1
-  pub fn update_mode_controller(&mut self) -> Result<(I16F16, I16F16)> {
+  /// Returned is a vector with the 3 pwm  values, in range -1..1
+  pub fn update_foc(&mut self) -> Result<()> {
+    // first do the foc mode (voltage, angle or torque)
     match self.foc_mode {
-      EFocMode::Idle => Ok((self.electrical_angle, I16F16::ZERO)),
-      EFocMode::Error(e) => Err(e),
-      EFocMode::Calibration(_) => self.do_calibration(),
+      EFocMode::Idle => self.voltage_request =  I16F16::ZERO,
+      EFocMode::Error(e) => return Err(e),
+      EFocMode::Calibration(_) => self.do_calibration()?,
       EFocMode::Angle(_) => {
         // Compare actual position with requested
         self.voltage_request = self
           .pid_angle
           .update_position(&self.shaft_position_req, &self.shaft_position_act)
           .clamp(self.voltage_q_limit_neg, self.voltage_q_limit_pos);
-        Ok((I16F16::from_num(self.electrical_angle), self.voltage_request))
       }
-      EFocMode::Velocity(_) => {
-        if self.open_loop_velocity {
+      EFocMode::Velocity(true) => {
             // note that in sensorless mode the shaft_position_req is the electrical angle of the shaft
             let delta_electrical_angle = self.nr_poles * self.speed_delta_inc;
             self.shaft_position_req.inc(delta_electrical_angle); // increment requested angle in rad/s
                                                                  // set the torque with the torque limit function
-            let request_angle = I16F16::from_num(self.shaft_position_req.get_angle());
-            Ok((request_angle, self.voltage_request))
-        } else {
+            self.electrical_angle = I16F16::from_num(self.shaft_position_req.get_angle());
+      }
+      EFocMode::Velocity(false) => {
           // increment the requested shaft position, but only if the diff with the actual shaft position is not too big
           let diff = self.shaft_position_req.compare(&self.shaft_position_act);
           if diff.abs() < I16F16::PI {
@@ -233,19 +228,31 @@ impl FocSimple {
             .pid_velocity
             .update_position(&self.shaft_position_req, &self.shaft_position_act)
             .clamp(self.voltage_q_limit_neg, self.voltage_q_limit_pos);
-          Ok((I16F16::from_num(self.electrical_angle), self.voltage_request))
-        }
       }
       EFocMode::Torque => {
-        Ok((I16F16::from_num(self.electrical_angle), self.voltage_request))
       },
     }
+    // be sure to limit the requested torque voltage to the given limits
+
+    // then the current loop
+    // sin and cos needed for both the forward loop (v_q, v_d) to pwm, as for the reverse (measured current to i_1, idt
+    let (sin_angle, cos_angle) = cordic::sin_cos(self.electrical_angle);
+    match self.current_mode {
+      EFocCurrentMode::Voltage => {
+        self.voltage_q = self.voltage_request;
+      }
+      EFocCurrentMode::CurrentFeedback => {
+        self.voltage_q = self.voltage_request/4;
+      }
+    }
+    // send the values to the output stage
+    self.foc_pwm.update_pwm(sin_angle, cos_angle, self.voltage_q, self.voltage_d)
   }
 
   /// Calculate the direction of the sensor in relation to the direction of the motor
   /// If needed invert the direction of the sensor
   /// Returned is a tuple of electrical angle and torque
-  fn do_calibration(&mut self) -> Result<(I16F16, I16F16)> {
+  fn do_calibration(&mut self) -> Result<()> {
     let req = self.shaft_position_req;
     let act = self.shaft_position_act;
 
@@ -253,6 +260,7 @@ impl FocSimple {
       ECalibrateState::Init => {
         self.shaft_position_req.reset();
         self.shaft_position_act.reset();
+        self.angle_inversed = false;
         self.electrical_offset = I16F16::ZERO;
         self.calibration_state = ECalibrateState::FindDirection;
       }
@@ -269,12 +277,11 @@ impl FocSimple {
             if act.get_position() < 0 {
               // reverse the direction in the driver. Motor must run in the same dir as the sensor
               rprintln!("Direction inversed");
-              self.shaft_position_act.set_inversed(true);
+              self.angle_inversed = true
             } else {
               rprintln!("Direction not inversed");
-              self.shaft_position_act.set_inversed(false);
+              self.angle_inversed = false
             }
-
             self.calibration_state = ECalibrateState::FindOffset;
           }
         } else {
@@ -303,14 +310,16 @@ impl FocSimple {
         // end conditions at start positon plu TAU/2
         if req.rotations == 0 && req.angle < I16F16::FRAC_TAU_2 {
           self.foc_mode = EFocMode::Idle;
-          rprintln!("Calibraton finished");
+          rprintln!("Calibration finished");
         } else {
           // rotate with 10 rad/sec negative
           self.shaft_position_req.inc((I6F26::ONE * -10)/ self.inner_loop_hz);
         }
       }
     }
-    Ok((I16F16::from_num(self.shaft_position_req.get_angle()), self.voltage_q_limit_pos/2))
+    self.electrical_angle = I16F16::from_num(self.shaft_position_req.get_angle());
+    self.voltage_request = self.voltage_q_limit_pos/2;
+    Ok(())
   }
 
   pub fn update_angle_from_sensor(&mut self, measured_angle: I16F16) {
@@ -360,7 +369,10 @@ impl FocSimple {
     
       let hall_state_idx = self.hall_step_base + hall_state as u8;
       // calculate the not interpolated angle
-      let angle = self.hall_step_angle * hall_state_idx as i32;
+      let mut angle = self.hall_step_angle * hall_state_idx as i32;
+      if self.angle_inversed {
+        angle = I6F26::TAU - angle;
+      }
       self.shaft_position_act.update_shaft_angle(angle);
       self.electrical_angle = I16F16::from_num(angle) * self.nr_poles - self.electrical_offset;
     }

@@ -10,7 +10,6 @@ pub struct ShaftPosition {
   angle_prev: I6F26,
   rotations_prev: i32,
   jump: bool, // set when the angle jumps with a difference bigger than TAU/6
-  inversed: bool,
 }
 impl ShaftPosition {
   pub fn new() -> Self {
@@ -20,15 +19,7 @@ impl ShaftPosition {
       angle_prev: I6F26::ZERO,
       rotations_prev: 0,
       jump: false,
-      inversed: false,
     }
-  }
-  /// mark the sensor for this motor as inversed or not inversed.
-  pub fn set_inversed(&mut self, inv: bool) {
-    self.inversed = inv;
-  }
-  pub fn is_inversed(&self) -> bool {
-    self.inversed
   }
   pub fn inc(&mut self, increment: I6F26) {
     self.jump = false;
@@ -67,7 +58,12 @@ impl ShaftPosition {
     self.angle = angle;
   }
   pub fn get_position(&self) -> I48F16 {
-    I48F16::from_num(self.rotations) * I48F16::TAU + I48F16::from_num(self.angle)
+      I48F16::from_num(self.rotations) * I48F16::TAU + I48F16::from_num(self.angle)
+  }
+
+  pub fn set_position(&mut self, p:I48F16) {
+    self.angle = I6F26::from_num(p.rem_euclid(I48F16::TAU));
+    self.rotations = p.div_euclid(I48F16::TAU).to_num()
   }
 
   /// bring the given angle in range of 0..TAU
@@ -97,12 +93,7 @@ impl ShaftPosition {
   }
 
   /// update the shaft angle with the new measured angle. Update the rotation, and check if there is a jump
-  pub fn update_shaft_angle(&mut self, new_angle: I6F26) {
-    let angle = if self.inversed {
-      I6F26::TAU - new_angle
-    } else {
-      new_angle
-    };
+  pub fn update_shaft_angle(&mut self, angle: I6F26) {
     let delta_angle = angle - self.angle;
     self.angle = angle;
     self.jump = false;
