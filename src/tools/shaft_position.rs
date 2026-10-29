@@ -1,6 +1,6 @@
 use fixed::types::{I6F26, I48F16, I16F16};
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 /// Shaft postions consists of a rotations and angle. The angle can count for -31 to 31 (6 bits), with a precision of 26 float bits
 /// This precision is needed, because we work with very small increments in this libray. 
 /// For example 60 RPM is TAU/s. With an inner loop of 25Khz the increment per tick will become 0.00025. So we need more than 16 bits for the float.

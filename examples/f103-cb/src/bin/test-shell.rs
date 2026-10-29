@@ -4,9 +4,12 @@
 #![no_std]
 
 use panic_rtt_target as _;
+//use panic_halt as _; 
+//use defmt_rtt as _; // wires up RTT as the transport for defmt
 use rtic::app;
 use rtic_monotonics::systick::prelude::*;
 use rtt_target::{rprintln, rtt_init_default};
+//use defmt::info;
 use stm32f1xx_hal::gpio::Pin;
 use stm32f1xx_hal::pac::EXTI;
 use stm32f1xx_hal::pac::{TIM2, TIM3};
@@ -20,7 +23,7 @@ mod app {
   use foc_simple_rtic::foc::foc_simple::FocSimple;
   use foc_simple_rtic::foc::EFocMode;
   use foc_simple_rtic::foc::{foc_pwm::FocPwm, EModulation, FocHallSensor};
-  use foc_simple_rtic::{FocCommandLine, EFocCommand, PidParam, COMMAND_QUEUE_RX, COMMAND_QUEUE_TX};
+  use foc_simple_rtic::{FocCommandLine, EFocCommand, COMMAND_QUEUE_RX, COMMAND_QUEUE_TX};
   use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
   use rtic_monotonics::fugit::{Instant, Rate, RateExtU32};
   use stm32f1xx_hal::gpio::{PA15, PB10, PB14};
@@ -204,18 +207,16 @@ mod app {
 
   #[task(local = [command_line], priority = 1)]
   async fn command_line_task(context: command_line_task::Context) {
-    rprintln!("Command line  task started");
+    rprintln!("Command task");
     context.local.command_line.task().await;
-    rprintln!("Command line  task finished");
   }
   #[task(local = [receiver1], priority = 2)]
   async fn receiver1_task(cx: receiver1_task::Context) {
-    rprintln!("Receiver1 task started");
+    rprintln!("Receiver1 task");
     while let Ok(command) = cx.local.receiver1.recv().await {
-        rprintln!("Receiver motor 1.Got: {:?}", command);
+        //rprintln!("Receiver motor 1.Got: {}", command);
         Mono::delay(10.millis()).await;
     }
-    rprintln!("Receiver1 task finished");
   }
 
   //  hall sensor
@@ -248,11 +249,11 @@ mod app {
     cx.shared.foc_simple.lock(|foc| {
       match  foc.update_foc(){
         Ok(_) => (),
-        Err(e) => rprintln!("Error:{:?}", e)
+        Err(e) => rprintln!("Error")
       };
     });
     cx.local.timer2.clear_interrupt(Event::Update);
-  }
+  } 
 
 
   // ticker task generating signals with 25 Khrz 

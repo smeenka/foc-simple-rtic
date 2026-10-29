@@ -36,14 +36,14 @@ pub trait PwmDriver {
   fn set_enabled(&mut self, enabled: bool);
 }
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EDir {
   Stopped,
   Cw,
   Ccw,
 }
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CalParams {
   dir: EDir,
   zero: I16F16,
@@ -54,7 +54,7 @@ impl CalParams {
   }
 }
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EFocMode {
   Idle,
   Calibration(Option<CalParams>),
@@ -63,7 +63,7 @@ pub enum EFocMode {
   Torque,
   Error(EFocSimpleError),
 }
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EFocCurrentMode {
   Voltage,
   CurrentFeedback, 

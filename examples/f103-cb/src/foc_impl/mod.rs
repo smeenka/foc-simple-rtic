@@ -1,9 +1,8 @@
 pub mod pwm_driver;
 
+
 use core::future::Future;
-use fixed::types::I16F16;
-use foc_simple_rtic::SensorAngle;
-use foc_simple_rtic::{EFocSimpleError, FocSerial, Result, SensorCurrent};
+use foc_simple_rtic::{EFocSimpleError, FocSerial, Result };
 use stm32f1xx_hal::serial::Rx;
 use stm32f1xx_hal::{pac::USART2, serial::Tx};
 
@@ -48,29 +47,3 @@ impl FocSerial for FocSerialImpl {
     }
 }
 
-// dummy implementation
-pub struct SensorCurrentImpl {}
-
-impl SensorCurrentImpl {
-    pub fn new() -> Self {
-        SensorCurrentImpl {}
-    }
-}
-impl SensorCurrent for SensorCurrentImpl {
-    fn get_current(&mut self) -> Result<[I16F16; 3]> {
-        Ok([I16F16::ZERO; 3])
-    }
-}
-pub struct SensorAngleDummy {}
-
-impl SensorAngleDummy {
-    pub fn new() -> Self {
-        SensorAngleDummy {}
-    }
-}
-
-impl SensorAngle for SensorAngleDummy {
-    fn get_angle(&mut self) -> Result<I16F16> {
-        Ok(I16F16::ZERO)
-    }
-}

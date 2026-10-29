@@ -1,5 +1,5 @@
 use fixed::{types::{I16F16,I6F26, I48F16}} ;
-use rtt_target::rprintln;
+//use rtt_target::rprintln;
 
 use crate::{
   EFocSimpleError, Result, ShaftPosition, foc::{ EFocCurrentMode, EFocMode, PwmDriver}, tools::foc_pid::FocPid,
@@ -199,9 +199,9 @@ where
   /// Returned is a vector with the 3 pwm  values, in range -1..1
   pub fn update_foc(&mut self) -> Result<()> {
     // first do the foc mode (voltage, angle or torque)
-    match self.foc_mode {
+    match &self.foc_mode {
       EFocMode::Idle => self.voltage_request =  I16F16::ZERO,
-      EFocMode::Error(e) => return Err(e),
+      EFocMode::Error(e) => return Err(e.clone()),
       EFocMode::Calibration(_) => self.do_calibration()?,
       EFocMode::Angle(_) => {
         // Compare actual position with requested
@@ -253,8 +253,8 @@ where
   /// If needed invert the direction of the sensor
   /// Returned is a tuple of electrical angle and torque
   fn do_calibration(&mut self) -> Result<()> {
-    let req = self.shaft_position_req;
-    let act = self.shaft_position_act;
+    let req = &self.shaft_position_req;
+    let act = &self.shaft_position_act;
 
     match self.calibration_state {
       ECalibrateState::Init => {
@@ -271,15 +271,15 @@ where
           if act.rotations == 0 && act.angle == I16F16::ZERO {
             self.calibration_state = ECalibrateState::Init;
             self.foc_mode = EFocMode::Error(EFocSimpleError::NoMotorMovement);
-            rprintln!("End condition No motor movement detected");
+            //rprintln!("No motor movement detected");
           } else {
             // set the direction
             if act.get_position() < 0 {
               // reverse the direction in the driver. Motor must run in the same dir as the sensor
-              rprintln!("Direction inversed");
+              //rprintln!("Direction inversed");
               self.angle_inversed = true
             } else {
-              rprintln!("Direction not inversed");
+              //rprintln!("Direction not inversed");
               self.angle_inversed = false
             }
             self.calibration_state = ECalibrateState::FindOffset;
@@ -300,7 +300,7 @@ where
           }
           self.electrical_offset = offset;
           self.calibration_state = ECalibrateState::ReturnToStart;
-          rprintln!("Electrical offset:{}", self.electrical_offset);
+          //rprintln!("Electrical offset:{}", self.electrical_offset);
         } else {
           // rotate with 10 rad/sec positive
           self.shaft_position_req.inc((I6F26::ONE * 10)/ self.inner_loop_hz);
@@ -310,7 +310,7 @@ where
         // end conditions at start positon plu TAU/2
         if req.rotations == 0 && req.angle < I16F16::FRAC_TAU_2 {
           self.foc_mode = EFocMode::Idle;
-          rprintln!("Calibration finished");
+          //rprintln!("Calibration finished");
         } else {
           // rotate with 10 rad/sec negative
           self.shaft_position_req.inc((I6F26::ONE * -10)/ self.inner_loop_hz);
@@ -335,7 +335,7 @@ where
   pub fn update_angle_from_hall(&mut self, hall_state: i8) {
     if hall_state < 0  {
       self.hall_error_count += 1;
-      rprintln!("Error Invalid hall state {}", hall_state,);
+      //rprintln!("Error Invalid hall state {}", hall_state,);
     } else {
       let prev = self.hall_step_prev;
       self.hall_step_prev = hall_state as u8;
@@ -348,7 +348,7 @@ where
               self.hall_step_base = 0;
             }
           } else if prev != 1 {
-            rprintln!("Error change new:{} old:{}", hall_state, prev);
+            //rprintln!("Error change new:{} old:{}", hall_state, prev);
             self.hall_error_count += 1;
           }
         }
@@ -360,7 +360,7 @@ where
               self.hall_step_base -= 6;
             }
           } else if prev != 4 {
-            rprintln!("Error change new:{} old:{}", hall_state, prev);
+            //rprintln!("Error change new:{} old:{}", hall_state, prev);
             self.hall_error_count += 1;
           }
         }

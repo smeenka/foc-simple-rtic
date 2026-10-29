@@ -12,7 +12,7 @@ pub mod tools;
 pub const COMMAND_QUEUE_RX:usize = 50; // foc => command_line
 pub const COMMAND_QUEUE_TX:usize = 10; // command_line => foc
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum EPidParameter {
   P(I16F16), // proportional gain
   I(I16F16), // integration gain
@@ -22,7 +22,7 @@ pub enum EPidParameter {
   Filter(I16F16), // low pass filtering time constant
 }
 
-#[derive(Clone, Debug, Copy, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum EPid {
   CurrentQ(EPidParameter),
   CurrentD(EPidParameter),
@@ -30,7 +30,7 @@ pub enum EPid {
   Angle(EPidParameter),
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum EFocLimit {
   Current(I16F16), // abs current limit in ampere
   Voltage(I16F16), // abs voltage limit as output by the motion controller 0..1
@@ -38,7 +38,7 @@ pub enum EFocLimit {
   Acceleration(I16F16)// acceleration limit in velocity mode in radians/sec2
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum EFocMonitor {
   DownSample(u32),   // down sample. 0 is off
   Set([bool;7]),     // enable /disable the 7 7 monitored variablen 
@@ -46,7 +46,7 @@ pub enum EFocMonitor {
   Sample(Vec<I16F16, 7>)
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum EFocCommand {
   Pid(EPid, bool),               // Get or Set a pid paramter
   Limit(EFocLimit, bool),       // Get or Set a foc limit   
@@ -61,7 +61,7 @@ pub enum EFocCommand {
   ErrorCount,                   // show the error count on the rtt channel, and reset to zero
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EFocSimpleError {
   Uninitialized,
   NoMagWarning,
@@ -88,26 +88,6 @@ pub trait SensorAngle {
   fn get_angle(&mut self) -> Result<I16F16>;
 }
 
-#[derive(Clone, Debug, Copy)]
-pub enum EFocAngleSensor<A> {
-  SensorLess,
-  ShaftSensor(A), // contains the implementation of the SensorAngle trait
-  HallSensor,
-}
-
-#[derive(Clone, Debug, Copy)]
-pub enum EFocCurrentSensor<C> {
-  SensorLess,
-  ThreePhase(C), // contains the implementation of the SensorCurrent Trait
-}
-
-// The trait for getting the current from the motor
-pub trait SensorCurrent {
-  /// Retrieve the current from the sensor.
-  /// Return on success the current array from the sensor, in amperes
-  /// In case 2 phases are sample set the third phase to zero here
-  fn get_current(&mut self) -> Result<[I16F16; 3]>;
-}
 
 pub type MessageRx = [u8; 64];
 pub struct MessageTx {
@@ -122,39 +102,3 @@ pub trait FocSerial {
   fn send(&mut self, buffer: &[u8]) -> Result<()>;
 }
 
-#[derive(Clone, Debug, Copy, PartialEq)]
-pub struct PidParam {
-  p: I16F16,
-  i: I16F16,
-  d: I16F16,
-}
-impl PidParam {
-  pub fn new_fp(fp: f32, fi: f32, fd: f32) -> Self {
-    PidParam {
-      p: I16F16::from_num(fp),
-      i: I16F16::from_num(fi),
-      d: I16F16::from_num(fd),
-    }
-  }
-  pub fn new(p: I16F16, i: I16F16, d: I16F16) -> Self {
-    PidParam { p, i, d }
-  }
-  pub fn set_p(&mut self, p: I16F16) {
-    self.p = p
-  }
-  pub fn set_i(&mut self, i: I16F16) {
-    self.i = i
-  }
-  pub fn set_d(&mut self, d: I16F16) {
-    self.d = d
-  }
-  pub fn get_p(&mut self) -> I16F16 {
-    self.p
-  }
-  pub fn get_i(&mut self) -> I16F16 {
-    self.i
-  }
-  pub fn get_d(&mut self) -> I16F16 {
-    self.d
-  }
-}

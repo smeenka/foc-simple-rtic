@@ -13,6 +13,12 @@ name = "f103-cb"
 version = "0.1.0"
 
 [dependencies]
+# Optie A: Reset het micro-controller board direct bij een panic
+
+defmt     = { version="1.1"}
+rtt-target = {version = "0.6", features = ["defmt"]}
+panic-rtt-target = {version = "0.2.0"}
+
 cordic = "0.1.5"
 cortex-m = {features = ["critical-section-single-core"], version = "0.7"}
 cortex-m-rt = "0.7"
@@ -20,19 +26,17 @@ embedded-hal = "1.0"
 fixed = "1.31"
 foc-simple-rtic = {path = "../..", version = "0.1.0"}
 heapless = {version = "0.9", default-features = false}
-panic-rtt-target = {version = "0.2.0"}
 rtic = {features = ["thumbv7-backend", "test-critical-section"], version = "2.2.0"}
 rtic-monotonics = {features = ["cortex-m-systick"], version = "2.1.0"}
-rtt-target = {version = "0.6.1", features = ["log", "defmt"]}
 stm32f1xx-hal = {features = ["rtic", "stm32f103", "medium"], version = "0.11.0"}
 rtic-sync = {version = "1.5", features = []}
 
 [profile.release]
-codegen-units = 1 # Reduce number of codegen units to increase optimizations
 lto = true # Enable link-time optimization
 opt-level = 'z' # Optimize for size
-panic = 'abort' # Abort on panic
-strip = true # Strip symbols from binary*
+codegen-units = 1 # Better LTO and dead-code elimination (at the cost of longer compile times)
+panic = "abort"  # Removes unwinding stack-table overhead
+strip = true     # Strip symbols and debug info from the binary
 
 [profile.dev.package."*"]
 opt-level = "z"

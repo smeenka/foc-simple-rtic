@@ -1,6 +1,5 @@
 use foc_simple_rtic::foc::PwmDriver;
 use foc_simple_rtic::Result;
-use rtt_target::rprintln;
 use stm32f1xx_hal::gpio::{ErasedPin, Output};
 use stm32f1xx_hal::pac::TIM1;
 use stm32f1xx_hal::timer::PwmChannel;
@@ -16,8 +15,6 @@ pub struct PwmDriverImpl {
 
 impl PwmDriverImpl {
   pub fn new(pwm_a: PwmChannel<TIM1, 0>, pwm_b: PwmChannel<TIM1, 1>, pwm_c: PwmChannel<TIM1, 2>, enable_a: ErasedPin<Output>, enable_b: ErasedPin<Output>, enable_c: ErasedPin<Output>) -> Self {
-    rprintln!("Max duty: {:?}", pwm_a.get_max_duty());
-
     PwmDriverImpl {
       pwm_a,
       pwm_b,

@@ -50,9 +50,8 @@ where
     }
   }
   pub async fn task(&mut self) {
-    rprintln!("Starting Foc Command Line Parser task\r\n");
-    rprintln!("See https://docs.simplefoc.com/commander_motor for the motor commands");
-    let mut line = [0_u8; 256];
+    rprintln!("Command Line task\r\n");
+    let mut line = [0_u8; 64];
     let mut line_idx = 0;
     loop {
       let mut word = [0_u8; 32];
@@ -68,11 +67,11 @@ where
                 // skip CR or LF if on position 0. Thats the way to handle CRLF or LFCR
                 if line_idx > 0 {
                   if self.verbose & 2 == 2 {
-                    rprintln!("Line:{:?}",&line[0..line_idx]);
+                    rprintln!(" Line:{:?}",&line[0..line_idx]);
                   }
                   if let Err(e) = self.handle_line(&line[0..line_idx]){
                     if self.verbose & 1 == 1 {
-                      rprintln!("Error:{:?} line:{:?}",e, &line[0..line_idx]);
+                      rprintln!("Error:{:?} line:{:?}", e, &line[0..line_idx]);
                     }
                   };
                   line_idx = 0
@@ -91,24 +90,24 @@ where
   }
 
   fn handle_line(&mut self, line: &[u8]) -> Result<()>{
-    match core::str::from_utf8(line) {
-      Ok(linestr) => {
-        //rprintln!("Line:{:?}", linestr);
-        match &linestr[0..1]{ 
-          "?" => { 
-            self.send("?0: motor 0\r\n?1: motor 1\r\n");
-            return Ok(())
-          }
-          _ => ()
-        }
-        if linestr.len() > 1 {
-          self.parse_line(linestr) 
-        } else  {
-          Err(EFocSimpleError::SerialError)
-        }  
+    let mut linestr:String<128> = String::new();
+    for b in line {
+      if let Some(c) = char::from_u32(*b as u32) {
+        _ = linestr.push(c)
       }
-      Err(_) => Err(EFocSimpleError::SerialError)
     }
+    match &linestr[0..1]{ 
+      "?" => { 
+        self.send("?0: motor 0\r\n?1: motor 1\r\n");
+        return Ok(())
+      }
+      _ => ()
+    }
+    if linestr.len() > 1 {
+      self.parse_line(linestr.as_str()) 
+    } else  {
+      Err(EFocSimpleError::SerialError)
+    }  
   }
   
   fn parse_line(&mut self, m: &str) -> Result<()>{
@@ -135,9 +134,12 @@ where
     };
     match command {
       Ok(c) => {
-        if c != EFocCommand::EnableStatus(false, false) {
-          if self.verbose & 4 == 4 {
-            rprintln!("command:{:?}",&c);
+        match c {
+          EFocCommand::EnableStatus(_, false) => (),
+          _ => {
+            if self.verbose & 4 == 4 {
+              rprintln!("command:");
+            }
           }
         }
         self.senders[self.motor_nr].try_send(c).ok();
@@ -150,24 +152,6 @@ where
   fn send(&mut self, message: &str) {
     let bytes = message.as_bytes();
     _ = self.serial.send(bytes);
-  }
-
-  fn send_nl(&mut self) {
-    let bytes = "\r\n".as_bytes();
-    _ = self.serial.send(bytes);
-  }
-
-  pub fn send_usize(&mut self, data: usize) {
-    let mut msg: String<10> = String::new();
-    _ = core::write!(&mut msg, "{}", data);
-    self.send(&msg);
-  }
-
-  pub fn send_i16f16(&mut self, data: I16F16) {
-    let mut msg: String<20> = String::new();
-    //let data: f32 = data.to_num();
-    _ = core::write!(&mut msg, "{}", data);
-    self.send(&msg);
   }
 
   fn handle_pid_param(&mut self, m: &str) -> Result<EFocCommand>{
@@ -209,7 +193,6 @@ where
       "A" => EFocLimit::Acceleration(value),
       _ => return Err(EFocSimpleError::NotImplementedYet)
     };
-    rprintln!("Limit: {:?}", &limit);
     Ok(EFocCommand::Limit(limit, m.len() > 3))
   } 
   fn handle_modulation(&mut self, m: &str) -> Result<EFocCommand>{
@@ -261,7 +244,7 @@ where
       }
       "G" => EFocMonitor::Get(I16F16::from_num(value)),
       "V" => {self.verbose = value as u32;
-        rprintln!("Set Verbose to:0x{:x}", value);
+        rprintln!("Set Verbose to:{}", value);
         return Err(EFocSimpleError::NotImplementedYet)
       }
       _ => return Err(EFocSimpleError::NotImplementedYet)    
@@ -364,15 +347,9 @@ where
     }
   }
   fn parse_integer(&mut self, word: &str, text: &str) -> Result<i32> {
-    match word.parse::<i32>() {
-      Err(_) => {
-        rprintln!("Error: For:{} unable to parse integer:{}", text, word);
-        Err(EFocSimpleError::SerialParseError)
-      }
-      Ok(f) => {
-        Ok(f)
-      }
-    }
+    let f = self.parse_float(word, text)?;
+    let result = f.int().to_num();
+    Ok(result)
   }
 
 

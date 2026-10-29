@@ -5,6 +5,8 @@ resolver = "3"
 [profile.release]
 # disable lto optimazation
 lto = true
+strip = false  # Automatically strip symbols from the binary.
+codegen-units = 1
 
 [profile.dev]
-opt-level = 0
+opt-level = "z"

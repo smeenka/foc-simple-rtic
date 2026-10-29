@@ -21,11 +21,13 @@ impl<D> FocSimple<D>  where D: PwmDriver {
             self.set_nr_poles(n as usize);
             None}
           EFocCommand::Target(target, _torque, _velocity) =>{
+            let t:f32 = target.to_num();
+            rprintln!("Set target to: {:?}", t);
             self.set_target(target);
             None
           }
           EFocCommand::ErrorCount => {
-            rprintln!("Total error count:{}", self.hall_error_count);
+            //rprintln!("Total error count:{}", self.hall_error_count);
             self.hall_error_count = 0;
             None
           }
@@ -40,17 +42,17 @@ impl<D> FocSimple<D>  where D: PwmDriver {
 
   pub fn foc_mode(&mut self, mode: EFocMode, do_set: bool) -> EFocMode {
     if do_set {
-      rprintln!("Set Foc mode:{:?}", mode);
+      rprintln!("Set Foc mode:");
       self.foc_mode = mode;
       self.target = I16F16::ZERO;
       self.voltage_request = self.target;
       self.voltage_d = I16F16::ZERO;
 
-      match self.foc_mode {
+      match &self.foc_mode {
         EFocMode::Calibration(param) => match param {
           Some(p) => {
             self.electrical_offset = p.zero;
-            self.angle_inversed = (p.dir == EDir::Ccw);
+            self.angle_inversed = p.dir == EDir::Ccw;
             self.foc_mode = EFocMode::Idle;
           }
           None => {
@@ -65,6 +67,7 @@ impl<D> FocSimple<D>  where D: PwmDriver {
           self.speed_act = I16F16::ZERO;
           self.speed_delta_inc = I6F26::ZERO;
           self.pid_velocity.set_integral_max(I16F16::ONE * 20);
+          self.voltage_request = self.voltage_q_limit_pos;
         }
         EFocMode::Torque => (),     
         EFocMode::Idle => (),
@@ -72,7 +75,7 @@ impl<D> FocSimple<D>  where D: PwmDriver {
       }
       self.shaft_position_req = self.shaft_position_act.clone();
     }
-    self.foc_mode
+    self.foc_mode.clone()
   }
 
 
@@ -80,7 +83,7 @@ impl<D> FocSimple<D>  where D: PwmDriver {
     if do_set {
       self.current_mode = mode;
     }
-    self.current_mode
+    self.current_mode.clone()
   }
 
 
@@ -152,6 +155,7 @@ impl<D> FocSimple<D>  where D: PwmDriver {
       }
       EFocMonitor::Set(t) => { 
         if do_set {
+          rprintln!("Set monitor to {:?}", t);
           self.monitor_set = t
         }
         EFocMonitor::Set(t)

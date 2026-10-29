@@ -4,6 +4,8 @@ runner = "probe-rs run --chip STM32F103RB"
 
 [build]
 target = "thumbv7m-none-eabi"
+rustflags = ["-C", "link-args=-Map=build_f7.map"]
+#rustflags = ["-C", "link-arg=-Tdefmt.x"]
 
 [env]
 DEFMT_LOG = "info"

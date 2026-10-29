@@ -21,7 +21,7 @@ mod app {
   use foc_simple_rtic::foc::foc_simple::FocSimple;
   use foc_simple_rtic::foc::EFocMode;
   use foc_simple_rtic::foc::{foc_pwm::FocPwm, EModulation, FocHallSensor};
-  use foc_simple_rtic::{EFocCommand, PidParam, COMMAND_QUEUE_RX, COMMAND_QUEUE_TX};
+  use foc_simple_rtic::{EFocCommand, COMMAND_QUEUE_RX, COMMAND_QUEUE_TX};
   use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
   use rtic_monotonics::fugit::{Instant, Rate, RateExtU32};
   use stm32f1xx_hal::gpio::{PA15, PB10, PB14};

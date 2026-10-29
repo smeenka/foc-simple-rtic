@@ -6,12 +6,13 @@
 use panic_rtt_target as _;
 use rtic::app;
 use rtic_monotonics::systick::prelude::*;
-use rtt_target::{rprintln, rtt_init_default};
+use rtt_target::{rprintln, rtt_init, ChannelMode};
 use stm32f1xx_hal::gpio::Pin;
 use stm32f1xx_hal::pac::EXTI;
 use stm32f1xx_hal::pac::TIM2;
 use stm32f1xx_hal::timer::pwm_input::PwmInput;
 use foc_simple_rtic::foc::PwmDriver;
+use defmt::info;
 
 systick_monotonic!(Mono, 1000);
 
@@ -33,7 +34,7 @@ mod app {
     timer::{CounterHz}
 
   };
-   use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;
+  use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;
   use stm32f1xx_hal::pac::TIM1;
 
   use super::*;
@@ -65,8 +66,18 @@ mod app {
     // Initialize the systick interrupt & obtain the token to prove that we did
     Mono::start(cx.core.SYST, 36_000_000);
 
-    let channels = rtt_init_default!();
+    let channels = rtt_init! {
+      up: {
+          0: { size: 256,  mode: ChannelMode::NoBlockSkip, name: "terminal", section: ".rtt_data" }
+          1: { size: 1024, mode: ChannelMode::NoBlockSkip, name: "defmt", section: ".rtt_data" }
+      }
+      down: {
+          0: { size: 16, name: "terminal", section: ".rtt_data" }
+      }
+      section_cb: ".rtt_data"
+    };    
     rtt_target::set_print_channel(channels.up.0);
+    rtt_target::set_defmt_channel(channels.up.1);
     rprintln!("Test foc_pwm module");
 
     let mut gpioa = cx.device.GPIOA.split(&mut rcc);
