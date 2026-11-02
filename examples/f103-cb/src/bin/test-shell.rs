@@ -4,7 +4,7 @@
 #![no_std]
 
 use panic_rtt_target as _;
-//use panic_halt as _; 
+//use panic_halt as _;
 //use defmt_rtt as _; // wires up RTT as the transport for defmt
 use rtic::app;
 use rtic_monotonics::systick::prelude::*;
@@ -19,32 +19,32 @@ systick_monotonic!(Mono, 1000);
 #[app(device = stm32f1xx_hal::pac, peripherals = true, dispatchers = [SPI1, SPI2])]
 mod app {
   use super::*;
+  use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
+  use f103_cb::foc_impl::FocSerialImpl;
   use fixed::types::I16F16;
   use foc_simple_rtic::foc::foc_simple::FocSimple;
   use foc_simple_rtic::foc::EFocMode;
   use foc_simple_rtic::foc::{foc_pwm::FocPwm, EModulation, FocHallSensor};
-  use foc_simple_rtic::{FocCommandLine, EFocCommand, COMMAND_QUEUE_RX, COMMAND_QUEUE_TX};
-  use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
+  use foc_simple_rtic::{EFocCommand, FocCommandLine, COMMAND_QUEUE_RX, COMMAND_QUEUE_TX};
   use rtic_monotonics::fugit::{Instant, Rate, RateExtU32};
+  use rtic_sync::{channel::*, make_channel};
   use stm32f1xx_hal::gpio::{PA15, PB10, PB14};
+  use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;
   use stm32f1xx_hal::{
     afio::AfioExt,
     flash::FlashExt,
     gpio::{Edge, ExtiPin, GpioExt, Input, Output, PullUp, PushPull, PA0, PA10, PA2, PA4, PB2, PC13},
     pac::Peripherals,
-    rcc::{self,Clocks, RccExt},
-    serial::{Config, Rx, Serial, Tx},    
-    time::{KiloHertz, Bps},
-    timer::{Channel, PwmExt, Tim1NoRemap, Tim2NoRemap, Timer, Event},
-    timer::{CounterHz}
-  };
-  use f103_cb::foc_impl::FocSerialImpl;
-  use rtic_sync::{channel::*, make_channel};
-  use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;  /* bring dependencies into scope */
+    rcc::{self, Clocks, RccExt},
+    serial::{Config, Rx, Serial, Tx},
+    time::{Bps, KiloHertz},
+    timer::CounterHz,
+    timer::{Channel, Event, PwmExt, Tim1NoRemap, Tim2NoRemap, Timer},
+  }; /* bring dependencies into scope */
 
   #[shared]
   struct Shared {
-    foc_simple: FocSimple<PwmDriverImpl>
+    foc_simple: FocSimple<PwmDriverImpl>,
   }
 
   #[local]
@@ -56,7 +56,7 @@ mod app {
     timer2: CounterHz<TIM2>,
     timer3: CounterHz<TIM3>,
     command_line: FocCommandLine<FocSerialImpl>,
-    receiver1: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>
+    receiver1: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>,
   }
 
   #[init]
@@ -85,7 +85,7 @@ mod app {
     // disable jtag
     let (pa15, _pb3, _pb4) = afio.mapr.disable_jtag(gpioa.pa15, gpiob.pb3, gpiob.pb4);
 
-    // Instantiate TIM2 that will be used to create the a fast ticker, 
+    // Instantiate TIM2 that will be used to create the a fast ticker,
     let mut timer2 = cx.device.TIM2.counter_hz(&mut rcc);
     timer2.start(5000.Hz()).unwrap();
     // Generate an interrupt when the timer expires
@@ -96,7 +96,6 @@ mod app {
     timer3.start(100.Hz()).unwrap();
     // Generate an interrupt when the timer expires
     timer3.listen(Event::Update);
-
 
     let mut hall1 = pa15.into_pull_up_input(&mut gpioa.crh);
     hall1.make_interrupt_source(&mut afio);
@@ -162,14 +161,12 @@ mod app {
     let (tx, rx) = serial.split();
     let parser = FocSerialImpl::new(tx, rx);
 
-
     let (sender0, receiver0) = make_channel!(EFocCommand, COMMAND_QUEUE_TX);
     let (sender1, receiver1) = make_channel!(EFocCommand, COMMAND_QUEUE_TX);
     let (sender_retour, receiver_retour) = make_channel!(EFocCommand, COMMAND_QUEUE_RX);
-    let senders = [sender0,sender1];
+    let senders = [sender0, sender1];
 
     let command_line = FocCommandLine::new(parser, senders, receiver_retour);
-
 
     let mut foc_simple = FocSimple::new(receiver0, sender_retour, foc_pwm);
     foc_simple.set_nr_poles(4);
@@ -204,7 +201,6 @@ mod app {
     }
   }
 
-
   #[task(local = [command_line], priority = 1)]
   async fn command_line_task(context: command_line_task::Context) {
     rprintln!("Command task");
@@ -214,8 +210,8 @@ mod app {
   async fn receiver1_task(cx: receiver1_task::Context) {
     rprintln!("Receiver1 task");
     while let Ok(command) = cx.local.receiver1.recv().await {
-        //rprintln!("Receiver motor 1.Got: {}", command);
-        Mono::delay(10.millis()).await;
+      //rprintln!("Receiver motor 1.Got: {}", command);
+      Mono::delay(10.millis()).await;
     }
   }
 
@@ -238,25 +234,24 @@ mod app {
     if h3.is_high() {
       phase |= 4;
     }
-    let state =FocHallSensor::calc_hall_state(phase);
+    let state = FocHallSensor::calc_hall_state(phase);
     cx.shared.foc_simple.lock(|foc| {
       foc.update_angle_from_hall(state);
     });
   }
-  // ticker task generating signals with 25 Khrz 
+  // ticker task generating signals with 25 Khrz
   #[task(binds=TIM2, local=[timer2],shared=[foc_simple], priority = 4)]
   fn timer2_task(mut cx: timer2_task::Context) {
     cx.shared.foc_simple.lock(|foc| {
-      match  foc.update_foc(){
+      match foc.update_foc() {
         Ok(_) => (),
-        Err(e) => rprintln!("Error")
+        Err(e) => rprintln!("Error"),
       };
     });
     cx.local.timer2.clear_interrupt(Event::Update);
-  } 
+  }
 
-
-  // ticker task generating signals with 25 Khrz 
+  // ticker task generating signals with 25 Khrz
   #[task(binds=TIM3, local=[timer3],shared=[foc_simple], priority = 4)]
   fn timer3_task(mut cx: timer3_task::Context) {
     cx.shared.foc_simple.lock(|foc| {
@@ -265,6 +260,4 @@ mod app {
     });
     cx.local.timer3.clear_interrupt(Event::Update);
   }
-
-
 }

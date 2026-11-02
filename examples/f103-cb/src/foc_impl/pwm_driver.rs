@@ -14,7 +14,14 @@ pub struct PwmDriverImpl {
 }
 
 impl PwmDriverImpl {
-  pub fn new(pwm_a: PwmChannel<TIM1, 0>, pwm_b: PwmChannel<TIM1, 1>, pwm_c: PwmChannel<TIM1, 2>, enable_a: ErasedPin<Output>, enable_b: ErasedPin<Output>, enable_c: ErasedPin<Output>) -> Self {
+  pub fn new(
+    pwm_a: PwmChannel<TIM1, 0>,
+    pwm_b: PwmChannel<TIM1, 1>,
+    pwm_c: PwmChannel<TIM1, 2>,
+    enable_a: ErasedPin<Output>,
+    enable_b: ErasedPin<Output>,
+    enable_c: ErasedPin<Output>,
+  ) -> Self {
     PwmDriverImpl {
       pwm_a,
       pwm_b,
@@ -45,5 +52,4 @@ impl PwmDriver for PwmDriverImpl {
       self.enable_c.set_low();
     }
   }
-  
 }

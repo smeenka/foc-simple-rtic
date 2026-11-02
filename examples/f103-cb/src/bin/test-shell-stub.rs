@@ -17,7 +17,9 @@ systick_monotonic!(Mono, 1000);
 #[app(device = stm32f1xx_hal::pac, peripherals = true, dispatchers = [SPI1, SPI2])]
 mod app {
   use f103_cb::foc_impl::FocSerialImpl;
+  use foc_simple_rtic::{EFocCommand, FocCommandLine, COMMAND_QUEUE_LEN};
   use rtic_monotonics::fugit::{Rate, RateExtU32};
+  use rtic_sync::{channel::*, make_channel};
   use stm32f1xx_hal::{
     afio::AfioExt,
     flash::FlashExt,
@@ -28,8 +30,6 @@ mod app {
     time::{Bps, KiloHertz},
     timer::{Tim2NoRemap, Timer},
   };
-  use rtic_sync::{channel::*, make_channel};
-  use foc_simple_rtic::{FocCommandLine, EFocCommand, COMMAND_QUEUE_LEN};
 
   use super::*;
 
@@ -44,7 +44,7 @@ mod app {
     button: PC13<Input<PullUp>>,
     command_line: FocCommandLine<FocSerialImpl>,
     receiver0: Receiver<'static, EFocCommand, COMMAND_QUEUE_LEN>,
-    receiver1: Receiver<'static, EFocCommand, COMMAND_QUEUE_LEN>
+    receiver1: Receiver<'static, EFocCommand, COMMAND_QUEUE_LEN>,
   }
 
   #[init]
@@ -97,7 +97,7 @@ mod app {
     let parser = FocSerialImpl::new(tx, rx);
     let (sender0, receiver0) = make_channel!(EFocCommand, COMMAND_QUEUE_LEN);
     let (sender1, receiver1) = make_channel!(EFocCommand, COMMAND_QUEUE_LEN);
-    let senders = [sender0,sender1];
+    let senders = [sender0, sender1];
 
     let command_line = FocCommandLine::new(parser, senders);
 
@@ -106,7 +106,16 @@ mod app {
     command_line_task::spawn().ok();
     receiver0_task::spawn().ok();
     receiver1_task::spawn().ok();
-    (Shared {}, Local { led, button, command_line, receiver0, receiver1 })
+    (
+      Shared {},
+      Local {
+        led,
+        button,
+        command_line,
+        receiver0,
+        receiver1,
+      },
+    )
   }
 
   #[task(local = [led], priority = 2)]
@@ -120,7 +129,7 @@ mod app {
   async fn receiver0_task(cx: receiver0_task::Context) {
     rprintln!("Receiver0` task started");
     while let Ok(command) = cx.local.receiver0.recv().await {
-        rprintln!("Receiver for motor0. got: {:?}",  command);
+      rprintln!("Receiver for motor0. got: {:?}", command);
     }
     rprintln!("Receiver0 task finished");
   }
@@ -128,7 +137,7 @@ mod app {
   async fn receiver1_task(cx: receiver1_task::Context) {
     rprintln!("Receiver1 task started");
     while let Ok(command) = cx.local.receiver1.recv().await {
-        rprintln!("Receiver motor 1.Got: {:?}", command);
+      rprintln!("Receiver motor 1.Got: {:?}", command);
     }
     rprintln!("Receiver1 task finished");
   }
@@ -145,6 +154,4 @@ mod app {
     context.local.button.clear_interrupt_pending_bit();
     rprintln!("EXTI15_10 Button on C13  pressed");
   }
-
 }
-

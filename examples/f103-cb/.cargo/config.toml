@@ -1,7 +1,7 @@
 [target.'cfg(all(target_arch = "arm", target_os = "none"))']
 # replace STM32F103RB with your chip as listed in `probe-rs chip list`
-runner = "probe-rs run --chip STM32F103RB"
-
+# runner = "probe-rs run --chip STM32F103RB"
+runner = "probe-rs run --chip STM32F103CB"
 [build]
 target = "thumbv7m-none-eabi"
 rustflags = ["-C", "link-args=-Map=build_f7.map"]

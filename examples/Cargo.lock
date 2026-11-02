@@ -151,6 +151,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc16"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "338089f42c427b86394a5ee60ff321da23a5c89c9d89514c829687b26359fcff"
+
+[[package]]
 name = "critical-section"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -200,6 +206,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10d60334b3b2e7c9d91ef8150abfb6fa4c1c39ebbcf4a81c2e346aad939fee3e"
 dependencies = [
  "thiserror",
+]
+
+[[package]]
+name = "defmt-rtt"
+version = "1.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "214e79c85b13a733762150567c988c580cbf1ecdc07805a0478fe8ca2c8380c7"
+dependencies = [
+ "critical-section",
+ "defmt 1.1.1",
 ]
 
 [[package]]
@@ -310,15 +326,15 @@ dependencies = [
  "cortex-m",
  "cortex-m-rt",
  "defmt 1.1.1",
+ "defmt-rtt",
  "embedded-hal 1.0.0",
  "fixed",
  "foc-simple-rtic",
  "heapless 0.9.3",
- "panic-rtt-target",
+ "panic-halt",
  "rtic",
  "rtic-monotonics",
  "rtic-sync",
- "rtt-target",
  "stm32f1xx-hal",
 ]
 
@@ -357,6 +373,8 @@ dependencies = [
  "cordic",
  "cortex-m",
  "cortex-m-rt",
+ "crc16",
+ "defmt 1.1.1",
  "embedded-hal 1.0.0",
  "fixed",
  "foc",
@@ -365,7 +383,6 @@ dependencies = [
  "panic-probe",
  "rtic-sync",
  "rtic-time",
- "rtt-target",
 ]
 
 [[package]]
@@ -593,6 +610,12 @@ dependencies = [
  "critical-section",
  "portable-atomic",
 ]
+
+[[package]]
+name = "panic-halt"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a513e167849a384b7f9b746e517604398518590a9142f4846a32e3c2a4de7b11"
 
 [[package]]
 name = "panic-probe"

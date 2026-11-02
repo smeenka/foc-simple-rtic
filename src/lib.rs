@@ -3,14 +3,19 @@
 use core::future::Future;
 use fixed::types::I16F16;
 use heapless::Vec;
-use crate::{foc::{EFocCurrentMode, EFocMode, EModulation}, tools::shaft_position::ShaftPosition};
+//use crate::{ tools::shaft_position::ShaftPosition};
+use crate::cdnet::CdnetPacket;
 
-pub use crate::tools::foc_command_line::FocCommandLine;
-pub mod foc;
+//pub use crate::tools::foc_command_line::FocCommandLine;
+//pub mod foc;
 pub mod tools;
+pub mod cdnet;
 
-pub const COMMAND_QUEUE_RX:usize = 50; // foc => command_line
-pub const COMMAND_QUEUE_TX:usize = 10; // command_line => foc
+pub const CD_MESSAGE_LEN:usize = 30;
+pub const CD_PACKET_LEN:usize = 35;
+pub const EVENT_QUEUE_LEN:usize = 10; // events to the user interface
+pub const COMMAND_QUEUE_LEN:usize = 4; // commands from the user interface
+pub const COMMAND_QUEUE_NR: usize = 3;  // channel 0 for application, 1 for motor 1 2 for motor 2 etc
 
 #[derive(Clone, Debug)]
 pub enum EPidParameter {
@@ -46,20 +51,15 @@ pub enum EFocMonitor {
   Sample(Vec<I16F16, 7>)
 }
 
+pub type EFocCommand = CdnetPacket;
+
 #[derive(Clone, Debug)]
-pub enum EFocCommand {
-  Pid(EPid, bool),               // Get or Set a pid paramter
-  Limit(EFocLimit, bool),       // Get or Set a foc limit   
-  MotionControl(EFocMode, bool),// Get or set the mode for the motion controller
-  CurrentControl(EFocCurrentMode, bool),// Get or set the mode for the current controller
-  Monitor(EFocMonitor, bool),         // Set the monitor status
-  EnableStatus(bool, bool),     // Get or set the enable status, first bool is enable status, second bool the setter
-  SensorOffset(I16F16, bool),  // get or set the sensor offset, in range -TAU ..TAU
-  Target(I16F16, Option<I16F16>, Option<I16F16>),  // target speed, angle or torque with optional torque limit and optional velocity limit
-  NrPoles(u8),                  // idle mode: set the nr of poles. Note: a calibration is needed after changing the number of poles
-  Modulation(EModulation),
-  ErrorCount,                   // show the error count on the rtt channel, and reset to zero
+pub enum EResultValue {
+  I16F16(I16F16),
+  Integer(i32),
+  None
 }
+pub type EFocEvent = [u8; CD_PACKET_LEN];
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum EFocSimpleError {
@@ -99,6 +99,16 @@ pub trait FocSerial {
   /// return the function which can read a chunk of bytes from the stream
   /// If Ok the ok contains the actual number of bytes read
   fn receive(&mut self, buffer: &mut [u8]) -> impl Future<Output = Result<usize>>;
+  fn send(&mut self, buffer: &[u8]) -> Result<()>;
+}
+
+pub trait FocSerialRx {
+  /// return the function which can read a chunk of bytes from the stream
+  /// If Ok the ok contains the actual number of bytes read
+  fn receive(&mut self, buffer: &mut [u8]) -> impl Future<Output = Result<usize>>;
+}
+
+pub trait FocSerialTx {
   fn send(&mut self, buffer: &[u8]) -> Result<()>;
 }
 

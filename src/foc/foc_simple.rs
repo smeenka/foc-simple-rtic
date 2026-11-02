@@ -2,16 +2,16 @@ use fixed::{types::{I16F16,I6F26, I48F16}} ;
 //use rtt_target::rprintln;
 
 use crate::{
-  EFocSimpleError, Result, ShaftPosition, foc::{ EFocCurrentMode, EFocMode, PwmDriver}, tools::foc_pid::FocPid,
+  EFocEvent, EFocSimpleError, Result, ShaftPosition, foc::{ EFocCurrentMode, EFocMode, PwmDriver}, tools::foc_pid::FocPid,
 };
-use crate::{COMMAND_QUEUE_RX, COMMAND_QUEUE_TX, EFocCommand};
+use crate::{COMMAND_QUEUE_LEN, EVENT_QUEUE_LEN, EFocCommand};
 use crate::foc::foc_pwm::FocPwm;
 use rtic_sync::channel::{Receiver, Sender};
 
 pub struct FocSimple<D: PwmDriver> {
   // user control
-  pub(crate) receiver: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>,
-  pub(crate) sender_retour: Sender<'static, EFocCommand, COMMAND_QUEUE_RX>,
+  pub(crate) command_queue: Receiver<'static, EFocCommand, COMMAND_QUEUE_LEN>,
+  pub(crate) event_queue: Sender<'static, EFocEvent, EVENT_QUEUE_LEN>,
 
   // internal state for the velocity controller 
   pub(crate) speed_acc: I16F16, // in rad/100 ms
@@ -81,12 +81,12 @@ impl<D> FocSimple<D>
 where
   D: PwmDriver {
   pub fn new(
-    receiver: Receiver<'static, EFocCommand, COMMAND_QUEUE_TX>,
-    sender_retour:Sender<'static, EFocCommand, COMMAND_QUEUE_RX>,
+    command_queue: Receiver<'static, EFocCommand, COMMAND_QUEUE_LEN>,
+    event_queue:Sender<'static, EFocEvent, EVENT_QUEUE_LEN>,
     foc_pwm: FocPwm<D>) -> FocSimple<D> {
     FocSimple {
-      receiver,
-      sender_retour,
+      command_queue,
+      event_queue,
 
       // internal state for the velocity controller 
       speed_acc: I16F16::ONE / 10, // in rad/100 ms

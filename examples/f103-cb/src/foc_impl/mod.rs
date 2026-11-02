@@ -1,49 +1,91 @@
-pub mod pwm_driver;
-
+//pub mod pwm_driver;
 
 use core::future::Future;
-use foc_simple_rtic::{EFocSimpleError, FocSerial, Result };
+use foc_simple_rtic::{EFocSimpleError, FocSerialTx, FocSerialRx, Result};
 use stm32f1xx_hal::serial::Rx;
 use stm32f1xx_hal::{pac::USART2, serial::Tx};
 
 pub struct FocSerialImpl {
-    tx: Tx<USART2>,
-    rx: Rx<USART2>,
+  tx: Tx<USART2>,
+  rx: Rx<USART2>,
 }
 
 impl FocSerialImpl {
-    pub fn new(tx: Tx<USART2>, rx: Rx<USART2>) -> Self {
-        FocSerialImpl { tx, rx }
+  pub fn new(tx: Tx<USART2>, rx: Rx<USART2>) -> Self {
+    FocSerialImpl { tx, rx }
+  }
+  // note next function is still blocking. as the rx.read is blocking
+  async fn wait_receive(&mut self, buffer: &mut [u8]) -> Result<usize> {
+    if !self.rx.is_rx_not_empty() {
+      return Ok(0);
     }
-    // note next function is still blocking. as the rx.read is blocking
-    async fn wait_receive(&mut self, buffer: &mut [u8]) -> Result<usize> {
-        if !self.rx.is_rx_not_empty() {
-            return Ok(0)
+    let mut idx = 0;
+    while self.rx.is_rx_not_empty() {
+      match self.rx.read() {
+        Ok(c) => {
+          buffer[idx] = c;
+          idx += 1;
         }
-        let mut idx = 0;
-        while self.rx.is_rx_not_empty() {
-            match self.rx.read() {
-                Ok(c) => {
-                    buffer[idx] = c;
-                    idx += 1;
-                }
-                Err(_err) => (),
-            }
-        }
-        Ok(idx)
+        Err(_err) => (),
+      }
     }
+    Ok(idx)
+  }
 }
 
-impl FocSerial for FocSerialImpl {
-    fn receive(&mut self, buffer: &mut [u8]) -> impl Future<Output = Result<usize>> {
-        // return the function, do not await here
-        self.wait_receive(buffer)
+
+
+pub struct FocSerialRxImpl {
+  rx: Rx<USART2>
+}
+
+impl FocSerialRxImpl {
+  pub fn new(rx: Rx<USART2>) -> Self {
+    FocSerialRxImpl { rx }
+  }
+  // note next function is still blocking. as the rx.read is blocking
+  async fn wait_receive(&mut self, buffer: &mut [u8]) -> Result<usize> {
+    if !self.rx.is_rx_not_empty() {
+      return Ok(0);
     }
-    fn send(&mut self, buffer: &[u8]) -> Result<()> {
-        match self.tx.bwrite_all_u8(buffer) {
-            Ok(()) => Ok(()),
-            Err(_) => Err(EFocSimpleError::SerialError),
+    let mut idx = 0;
+    while self.rx.is_rx_not_empty() {
+      match self.rx.read() {
+        Ok(c) => {
+          buffer[idx] = c;
+          idx += 1;
         }
+        Err(_err) => (),
+      }
     }
+    Ok(idx)
+  }
+}
+
+impl FocSerialRx for FocSerialRxImpl {
+  fn receive(&mut self, buffer: &mut [u8]) -> impl Future<Output = Result<usize>> {
+    // return the function, do not await here
+    self.wait_receive(buffer)
+  }
+}
+
+
+pub struct FocSerialTxImpl {
+  tx: Tx<USART2>
+}
+
+impl FocSerialTxImpl {
+  pub fn new(tx: Tx<USART2>) -> Self {
+    FocSerialTxImpl { tx }
+  }
+}
+
+impl FocSerialTx for FocSerialTxImpl {
+  fn send(&mut self, buffer: &[u8]) -> Result<()> {
+    match self.tx.bwrite_all_u8(buffer) {
+      Ok(()) => Ok(()),
+      Err(_) => Err(EFocSimpleError::SerialError),
+    }
+  }
 }
 

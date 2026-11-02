@@ -23,13 +23,11 @@ fixed = "1.31"
 foc = "0.3.0"
 heapless = {version = "0.9", default-features = false}
 panic-probe = {version = "1.0.0", features = ["print-defmt"]}
-rtt-target = {version = "0.6", features = ["log", "defmt"]}
-#defmt     = "1.1.1"
-
+defmt     = {version ="1.1"}
+crc16 = "0.4"
 rtic-time = {version = "2.0", features = []}
 rtic-sync = {version = "1.5", features = []}
 log = "0.4"
-
 [profile.release]
 # disable lto optimization
 debug = 2

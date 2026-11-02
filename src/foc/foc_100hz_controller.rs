@@ -36,6 +36,7 @@ impl<D> FocSimple<D>  where D: PwmDriver {
       if self.monitor_count <= 0 {
         // reload monitor counter
         self.monitor_count = self.monitor_reload as i32;
+        /* 
         let mut result = Vec::new();
         for i in 0..7 {
           if self.monitor_set[i] {
@@ -52,7 +53,8 @@ impl<D> FocSimple<D>  where D: PwmDriver {
             });
           } 
         }
-        _ = self.sender_retour.try_send(EFocCommand::Monitor(EFocMonitor::Sample(result), false));
+        */
+        //_ = self.sender_retour.try_send(EFocCommand::Monitor(EFocMonitor::Sample(result), false));
       }
     }
   }

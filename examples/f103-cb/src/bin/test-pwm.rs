@@ -3,6 +3,8 @@
 #![no_main]
 #![no_std]
 
+use defmt::info;
+use foc_simple_rtic::foc::PwmDriver;
 use panic_rtt_target as _;
 use rtic::app;
 use rtic_monotonics::systick::prelude::*;
@@ -11,17 +13,17 @@ use stm32f1xx_hal::gpio::Pin;
 use stm32f1xx_hal::pac::EXTI;
 use stm32f1xx_hal::pac::TIM2;
 use stm32f1xx_hal::timer::pwm_input::PwmInput;
-use foc_simple_rtic::foc::PwmDriver;
-use defmt::info;
 
 systick_monotonic!(Mono, 1000);
 
 #[app(device = stm32f1xx_hal::pac, peripherals = true, dispatchers = [SPI1])]
 mod app {
+  use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
   use fixed::types::I16F16;
   use foc_simple_rtic::foc::{foc_pwm::FocPwm, EModulation};
-  use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
   use rtic_monotonics::fugit::{Rate, RateExtU32};
+  use stm32f1xx_hal::pac::TIM1;
+  use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;
   use stm32f1xx_hal::{
     afio::AfioExt,
     flash::FlashExt,
@@ -30,12 +32,9 @@ mod app {
     rcc::{self, Clocks, RccExt},
     time::KiloHertz,
     timer::pwm_input::{Configuration, ReadMode},
-    timer::{Channel, PwmExt, Tim1NoRemap, Tim2NoRemap, Timer, Event},
-    timer::{CounterHz}
-
+    timer::CounterHz,
+    timer::{Channel, Event, PwmExt, Tim1NoRemap, Tim2NoRemap, Timer},
   };
-  use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;
-  use stm32f1xx_hal::pac::TIM1;
 
   use super::*;
 
@@ -50,7 +49,7 @@ mod app {
   struct Local {
     led: PB2<Output<PushPull>>,
     timer2: CounterHz<TIM2>,
-    angle: I16F16
+    angle: I16F16,
   }
 
   #[init]
@@ -75,7 +74,7 @@ mod app {
           0: { size: 16, name: "terminal", section: ".rtt_data" }
       }
       section_cb: ".rtt_data"
-    };    
+    };
     rtt_target::set_print_channel(channels.up.0);
     rtt_target::set_defmt_channel(channels.up.1);
     rprintln!("Test foc_pwm module");
@@ -100,7 +99,6 @@ mod app {
 
     // disable jtag
     //t (_pa15, _pb3, _pb4) = afio.mapr.disable_jtag(gpioa.pa15, gpiob.pb3, gpiob.pb4);
-
 
     // Configure TIM1 into PWM output mode.
     let mut pwm = cx
@@ -133,12 +131,18 @@ mod app {
     // Generate an interrupt when the timer expires
     timer2.listen(Event::Update);
 
-
     // Schedule the blinking task
     blink_task::spawn().ok();
     motor_task::spawn().ok();
 
-    (Shared {foc_pwm }, Local { led, timer2, angle:I16F16::ZERO })
+    (
+      Shared { foc_pwm },
+      Local {
+        led,
+        timer2,
+        angle: I16F16::ZERO,
+      },
+    )
   }
 
   #[task(local = [led])]
@@ -164,10 +168,9 @@ mod app {
       cx.shared.foc_pwm.lock(|pwm| {
         pwm.set_enabled(true);
       });
-
     }
   }
-// ticker task generating signals with 25 Khrz 
+  // ticker task generating signals with 25 Khrz
   #[task(binds=TIM2, local=[timer2, angle], shared=[foc_pwm], priority = 4)]
   fn timer_task(mut cx: timer_task::Context) {
     let mut ang = *cx.local.angle;

@@ -111,24 +111,24 @@ mod app {
   async fn serial(cx: serial::Context) {
     let mut count = 0;
     loop {
-        core::writeln!(
-          cx.local.tx,
-          " Please send characters to the device. Count nr:{:02}\r\n",
-          count
-        ).unwrap();
-        count += 1;
-        let mut buffer = [0_u8; 64];
-        match cx.local.rx.read() {
-          Ok(a) => {
-            cx.local.tx.write_u8(65);
-            cx.local.tx.write_u8(a);
-            cx.local.tx.flush();
-          }
-          Err(_) => (),
+      core::writeln!(
+        cx.local.tx,
+        " Please send characters to the device. Count nr:{:02}\r\n",
+        count
+      )
+      .unwrap();
+      count += 1;
+      let mut buffer = [0_u8; 64];
+      match cx.local.rx.read() {
+        Ok(a) => {
+          cx.local.tx.write_u8(65);
+          cx.local.tx.write_u8(a);
+          cx.local.tx.flush();
         }
+        Err(_) => (),
       }
-      Mono::delay(1000.millis()).await;
     }
+    Mono::delay(1000.millis()).await;
   }
 
   /// note that  C13 is connected to EXTI3

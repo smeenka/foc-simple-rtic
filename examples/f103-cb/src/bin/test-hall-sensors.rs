@@ -10,9 +10,9 @@ use rtt_target::{rprintln, rtt_init_default};
 use stm32f1xx_hal::gpio::Pin;
 use stm32f1xx_hal::pac::EXTI;
 use stm32f1xx_hal::pac::TIM2;
+use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;
 use stm32f1xx_hal::timer::pwm_input::PwmInput;
 use stm32f1xx_hal::timer::Tim2NoRemap;
-use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;
 
 /// PWM input monitor type
 pub(crate) type PwmMonitor = PwmInput<TIM2>;
@@ -21,8 +21,10 @@ systick_monotonic!(Mono, 1000);
 
 #[app(device = stm32f1xx_hal::pac, peripherals = true, dispatchers = [SPI1])]
 mod app {
-  use rtic_monotonics::fugit::{Rate, RateExtU32};
   use fixed::types::I16F16;
+  use foc_simple_rtic::foc::foc_simple::FocSimple;
+  use foc_simple_rtic::foc::FocHallSensor;
+  use rtic_monotonics::fugit::{Rate, RateExtU32};
   use stm32f1xx_hal::{
     afio::AfioExt,
     flash::FlashExt,
@@ -32,13 +34,10 @@ mod app {
     pac::Peripherals,
     rcc::{self, Clocks, RccExt},
     time::KiloHertz,
-
     timer::pwm_input::{Configuration, ReadMode},
+    timer::{CounterHz, Event},
     timer::{Tim2NoRemap, Timer},
-    timer::{CounterHz, Event}
   };
-  use foc_simple_rtic::foc::foc_simple::FocSimple;
-  use foc_simple_rtic::foc::FocHallSensor;
 
   use super::*;
 
@@ -58,7 +57,7 @@ mod app {
     hall3: PB10<Input<PullUp>>,
     timer2: CounterHz<TIM2>,
     rotations: i32,
-    angle: I16F16
+    angle: I16F16,
   }
 
   #[init]
@@ -120,9 +119,7 @@ mod app {
     let mut foc_simple = FocSimple::new();
     foc_simple.set_nr_poles(4);
     (
-      Shared {
-        foc_simple,
-      },
+      Shared { foc_simple },
       Local {
         led,
         button,
@@ -130,8 +127,8 @@ mod app {
         hall2,
         hall3,
         timer2,
-        rotations:0,
-        angle: I16F16::ZERO
+        rotations: 0,
+        angle: I16F16::ZERO,
       },
     )
   }
@@ -144,7 +141,7 @@ mod app {
     }
   }
 
-// ticker task generating signals with 5000 hrz and 100 hrz
+  // ticker task generating signals with 5000 hrz and 100 hrz
   #[task(binds=TIM2, local=[timer2, rotations, angle], shared=[foc_simple], priority = 4)]
   fn timer_task(mut cx: timer_task::Context) {
     cx.shared.foc_simple.lock(|foc| {
@@ -159,7 +156,6 @@ mod app {
     });
     cx.local.timer2.clear_interrupt(Event::Update);
   }
-
 
   /// note that  C13 is connected to EXTI3
   #[task(binds=EXTI15_10,  local=[button, hall1, hall2, hall3], shared=[foc_simple])]
@@ -184,11 +180,16 @@ mod app {
       if h3.is_high() {
         phase |= 4;
       }
-      let state =FocHallSensor::calc_hall_state(phase);
+      let state = FocHallSensor::calc_hall_state(phase);
       ct.shared.foc_simple.lock(|foc| {
         foc.update_angle_from_hall(state);
         let s = foc.get_position_act();
-        rprintln!("Hall state now:{} rotations: {} angle:{}", phase, s.get_rotations(), s.get_angle());
+        rprintln!(
+          "Hall state now:{} rotations: {} angle:{}",
+          phase,
+          s.get_rotations(),
+          s.get_angle()
+        );
       });
     }
   }

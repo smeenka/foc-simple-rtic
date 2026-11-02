@@ -4,9 +4,6 @@ pub mod foc_simple;
 pub mod foc_100hz_controller;
 pub mod foc_command;
 
-pub const MAX_MOTOR_NR: usize = 2;
-pub const COMMAND_CHANNEL_SIZE: usize = 25;
-
 use fixed::types::I16F16;
 pub use foc_hall_sensor::FocHallSensor;
 

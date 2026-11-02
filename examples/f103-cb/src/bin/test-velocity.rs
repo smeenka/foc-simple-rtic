@@ -3,6 +3,7 @@
 #![no_main]
 #![no_std]
 
+use foc_simple_rtic::EFocLimit;
 use panic_rtt_target as _;
 use rtic::app;
 use rtic_monotonics::systick::prelude::*;
@@ -10,37 +11,36 @@ use rtt_target::{rprintln, rtt_init_default};
 use stm32f1xx_hal::gpio::Pin;
 use stm32f1xx_hal::pac::EXTI;
 use stm32f1xx_hal::pac::TIM2;
- use foc_simple_rtic::EFocLimit;
 
 systick_monotonic!(Mono, 1000);
 
 #[app(device = stm32f1xx_hal::pac, peripherals = true, dispatchers = [SPI1, SPI2])]
 mod app {
   use super::*;
+  use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
   use fixed::types::I16F16;
   use foc_simple_rtic::foc::foc_simple::FocSimple;
   use foc_simple_rtic::foc::EFocMode;
   use foc_simple_rtic::foc::{foc_pwm::FocPwm, EModulation, FocHallSensor};
   use foc_simple_rtic::{EFocCommand, COMMAND_QUEUE_RX, COMMAND_QUEUE_TX};
-  use f103_cb::foc_impl::pwm_driver::PwmDriverImpl;
   use rtic_monotonics::fugit::{Instant, Rate, RateExtU32};
+  use rtic_sync::{channel::*, make_channel};
   use stm32f1xx_hal::gpio::{PA15, PB10, PB14};
+  use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;
   use stm32f1xx_hal::{
     afio::AfioExt,
     flash::FlashExt,
     gpio::{Edge, ExtiPin, GpioExt, Input, Output, PullUp, PushPull, PA0, PA10, PA2, PA4, PB2, PC13},
     pac::Peripherals,
-    rcc::{self,Clocks, RccExt},
+    rcc::{self, Clocks, RccExt},
     time::KiloHertz,
-    timer::{Channel, PwmExt, Tim1NoRemap, Tim2NoRemap, Timer, Event},
-    timer::{CounterHz}
-  };
-  use rtic_sync::{channel::*, make_channel};
-  use stm32f1xx_hal::prelude::_stm32f4xx_hal_timer_TimerExt;  /* bring dependencies into scope */
+    timer::CounterHz,
+    timer::{Channel, Event, PwmExt, Tim1NoRemap, Tim2NoRemap, Timer},
+  }; /* bring dependencies into scope */
 
   #[shared]
   struct Shared {
-    foc_simple: FocSimple<PwmDriverImpl>
+    foc_simple: FocSimple<PwmDriverImpl>,
   }
 
   #[local]
@@ -50,8 +50,7 @@ mod app {
     hall2: PB14<Input<PullUp>>,
     hall3: PB10<Input<PullUp>>,
     timer2: CounterHz<TIM2>,
-    sender: Sender<'static, EFocCommand, COMMAND_QUEUE_TX>
-
+    sender: Sender<'static, EFocCommand, COMMAND_QUEUE_TX>,
   }
 
   #[init]
@@ -133,13 +132,11 @@ mod app {
       ec0.erase(),
     );
 
-
     let mut foc_pwm = FocPwm::new(pwm_driver, max, 0.4);
     foc_pwm.set_enabled(true);
 
     let (sender, receiver) = make_channel!(EFocCommand, COMMAND_QUEUE_TX);
     let (retour_sender, retour_receiver) = make_channel!(EFocCommand, COMMAND_QUEUE_RX);
-
 
     let mut foc_simple = FocSimple::new(receiver, retour_sender, foc_pwm);
     foc_simple.set_nr_poles(4);
@@ -157,7 +154,7 @@ mod app {
         hall2,
         hall3,
         sender,
-        timer2
+        timer2,
       },
     )
   }
@@ -187,36 +184,41 @@ mod app {
     }
   }
 
-
   // motor task, waiting for incoming signals for 1 ms, 10 ms, hall sensor and commands
   #[task(local = [sender], priority = 2)]
   async fn motor_task(cx: motor_task::Context) {
     rprintln!("BLCD motor  with sinusiode driver, 1/4 torque, 1 rad/s");
     let mut sender = cx.local.sender;
-    sender.try_send(EFocCommand::MotionControl(EFocMode::Calibration(None), true)).ok();
+    sender
+      .try_send(EFocCommand::MotionControl(EFocMode::Calibration(None), true))
+      .ok();
     rprintln!("Calibration in progress");
     Mono::delay_until(Mono::now() + 5.secs()).await;
-    
+
     rprintln!("Calibration finished");
-    sender.try_send(EFocCommand::MotionControl(EFocMode::Velocity(false), true)).ok();
-    sender.try_send(EFocCommand::Limit(EFocLimit::Acceleration(I16F16::ONE * 10), true)).ok();
+    sender
+      .try_send(EFocCommand::MotionControl(EFocMode::Velocity(false), true))
+      .ok();
+    sender
+      .try_send(EFocCommand::Limit(EFocLimit::Acceleration(I16F16::ONE * 10), true))
+      .ok();
     loop {
-        let mut instant = Mono::now();
-        sender.try_send(EFocCommand::Target(I16F16::TAU, None,None)).ok();
-        rprintln!("Motor 60 RPM");
-        Mono::delay_until(instant+ 10.secs()).await;
+      let mut instant = Mono::now();
+      sender.try_send(EFocCommand::Target(I16F16::TAU, None, None)).ok();
+      rprintln!("Motor 60 RPM");
+      Mono::delay_until(instant + 10.secs()).await;
 
-        sender.try_send(EFocCommand::Target(I16F16::ZERO, None,None)).ok();
-        rprintln!("Motor stopping");
-        Mono::delay_until(instant+ 15.secs()).await;
+      sender.try_send(EFocCommand::Target(I16F16::ZERO, None, None)).ok();
+      rprintln!("Motor stopping");
+      Mono::delay_until(instant + 15.secs()).await;
 
-        sender.try_send(EFocCommand::Target(-1 * I16F16::TAU, None,None)).ok();
-        rprintln!("Motor negative 60 RPM");
-        Mono::delay_until(instant+ 20.secs()).await;
+      sender.try_send(EFocCommand::Target(-1 * I16F16::TAU, None, None)).ok();
+      rprintln!("Motor negative 60 RPM");
+      Mono::delay_until(instant + 20.secs()).await;
 
-        sender.try_send(EFocCommand::Target(I16F16::ZERO, None,None)).ok();
-        rprintln!("Motor stopped");
-        Mono::delay_until(instant+ 25.secs()).await;
+      sender.try_send(EFocCommand::Target(I16F16::ZERO, None, None)).ok();
+      rprintln!("Motor stopped");
+      Mono::delay_until(instant + 25.secs()).await;
     }
   }
 
@@ -239,21 +241,20 @@ mod app {
     if h3.is_high() {
       phase |= 4;
     }
-    let state =FocHallSensor::calc_hall_state(phase);
+    let state = FocHallSensor::calc_hall_state(phase);
     cx.shared.foc_simple.lock(|foc| {
       foc.update_angle_from_hall(state);
     });
   }
-  // ticker task generating signals with 25 Khrz 
+  // ticker task generating signals with 25 Khrz
   #[task(binds=TIM2, local=[timer2],shared=[foc_simple], priority = 4)]
   fn timer_task(mut cx: timer_task::Context) {
     cx.shared.foc_simple.lock(|foc| {
-      match  foc.update_foc(){
+      match foc.update_foc() {
         Ok(_) => (),
-        Err(e) => rprintln!("Error:{:?}", e)
+        Err(e) => rprintln!("Error:{:?}", e),
       };
     });
     cx.local.timer2.clear_interrupt(Event::Update);
   }
-
 }

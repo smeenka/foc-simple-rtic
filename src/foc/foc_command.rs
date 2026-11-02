@@ -6,7 +6,8 @@ use rtt_target::rprintln;
 impl<D> FocSimple<D>  where D: PwmDriver {
     // user interface commands
   pub fn handle_command_queue(&mut self) {
-    if let Ok(message) = self.receiver.try_recv() {
+    if let Ok(message) = self.command_queue.try_recv() {
+      /* 
       let m = match message {
           EFocCommand::Pid(pid, setter) => Some(EFocCommand::Pid(self.pid_param(pid, setter), false)),
           EFocCommand::MotionControl(mode, setter ) => Some(EFocCommand::MotionControl(self.foc_mode(mode, setter), false)),
@@ -37,6 +38,7 @@ impl<D> FocSimple<D>  where D: PwmDriver {
       if let Some(message) = m {
         _ = self.sender_retour.try_send(message);
       }
+      */
     }
   }
 
